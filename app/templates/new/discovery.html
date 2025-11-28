@@ -1,12 +1,185 @@
-<div class="container">
+<style>
+    /* Custom scrollbar for webkit browsers */
+    .results-grid::-webkit-scrollbar {
+        width: 8px;
+    }
+    .results-grid::-webkit-scrollbar-track {
+        background: #161B22;
+    }
+    .results-grid::-webkit-scrollbar-thumb {
+        background-color: #30363D;
+        border-radius: 4px;
+        border: 2px solid #161B22;
+    }
+
+    .results-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 1rem;
+        max-height: 75vh;
+        overflow-y: auto;
+        padding: 0 1rem;
+    }
+    .card {
+        background-color: #161B22;
+        border: 1px solid #30363D;
+        color: #C9D1D9;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .card-body {
+        flex-grow: 1;
+    }
+    .card-title a {
+        color: #58A6FF;
+        text-decoration: none;
+    }
+    .card-title a:hover {
+        text-decoration: underline;
+    }
+    .card-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+</style>
+<div class="container-fluid mt-4">
     <div class="row justify-content-center">
         <div class="col-md-8 text-center">
             <h1 class="display-4">Resource Discovery</h1>
-            <p class="lead">Searching so.252035.xyz</p>
+            <p class="lead">Search for resources across multiple providers.</p>
             <div class="input-group mb-3">
-                <input type="text" class="form-control" placeholder="Search movies, shows, software...">
-                <button class="btn btn-primary" type="button"><i class="bi bi-search"></i> Search</button>
+                <input type="text" id="searchInput" class="form-control" placeholder="Search movies, shows, software...">
+                <button class="btn btn-primary" type="button" id="searchButton"><i class="bi bi-search"></i> Search</button>
             </div>
         </div>
     </div>
+
+    <div id="loadingSpinner" class="text-center mt-4" style="display: none;">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+
+    <div id="errorMessage" class="alert alert-danger mt-4" style="display: none;" role="alert">
+    </div>
+
+    <div id="resultsContainer" class="results-grid mt-4">
+        <!-- Search results will be inserted here as cards -->
+    </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const searchButton = document.getElementById('searchButton');
+    const searchInput = document.getElementById('searchInput');
+    const resultsContainer = document.getElementById('resultsContainer');
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    const errorMessage = document.getElementById('errorMessage');
+
+    const performSearch = () => {
+        const query = searchInput.value.trim();
+        if (query === '') {
+            errorMessage.textContent = 'Please enter a search term.';
+            errorMessage.style.display = 'block';
+            return;
+        }
+
+        loadingSpinner.style.display = 'block';
+        resultsContainer.innerHTML = '';
+        errorMessage.style.display = 'none';
+
+        axios.get('/task_suggestions', {
+            params: {
+                q: query,
+                d: 1 
+            }
+        })
+        .then(response => {
+            loadingSpinner.style.display = 'none';
+            if (response.data.success && response.data.data.length > 0) {
+                renderResults(response.data.data);
+            } else {
+                errorMessage.textContent = 'No results found.';
+                errorMessage.style.display = 'block';
+            }
+        })
+        .catch(error => {
+            loadingSpinner.style.display = 'none';
+            console.error('Error fetching search results:', error);
+            errorMessage.textContent = 'An error occurred while fetching results.';
+            errorMessage.style.display = 'block';
+        });
+    };
+
+    const renderResults = (results) => {
+        resultsContainer.innerHTML = ''; // Clear previous results
+        results.forEach(item => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            
+            const cardBody = document.createElement('div');
+            cardBody.className = 'card-body';
+
+            const title = document.createElement('h5');
+            title.className = 'card-title';
+            const titleLink = document.createElement('a');
+            titleLink.href = item.shareurl;
+            titleLink.target = '_blank';
+            titleLink.textContent = item.taskname;
+            title.appendChild(titleLink);
+
+            const description = document.createElement('p');
+            description.className = 'card-text small';
+            description.textContent = item.content || 'No description available.';
+
+            const footer = document.createElement('div');
+            footer.className = 'card-footer bg-transparent border-top-0';
+            
+            const badges = document.createElement('div');
+
+            const sourceBadge = document.createElement('span');
+            sourceBadge.className = 'badge bg-success me-1';
+            sourceBadge.textContent = item.source || 'Network';
+            
+            const channelBadge = document.createElement('span');
+            channelBadge.className = 'badge bg-info me-1';
+            channelBadge.textContent = item.channel || 'Unknown';
+            
+            badges.appendChild(sourceBadge);
+            badges.appendChild(channelBadge);
+
+            const transferButton = document.createElement('button');
+            transferButton.className = 'btn btn-sm btn-outline-light';
+            transferButton.innerHTML = '<i class="bi bi-send-plus"></i>';
+            transferButton.title = 'Send to Transfer';
+            transferButton.onclick = () => {
+                localStorage.setItem('shareUrlToTransfer', item.shareurl);
+                window.location.hash = '#transfer';
+                const navLink = document.querySelector('a.nav-link[href="#transfer"]');
+                if (navLink) {
+                    navLink.click();
+                }
+            };
+            
+            cardBody.appendChild(title);
+            cardBody.appendChild(description);
+            footer.appendChild(badges);
+            footer.appendChild(transferButton);
+            card.appendChild(cardBody);
+            card.appendChild(footer);
+
+            resultsContainer.appendChild(card);
+        });
+    };
+
+    searchButton.addEventListener('click', performSearch);
+    searchInput.addEventListener('keyup', function (event) {
+        if (event.key === 'Enter') {
+            performSearch();
+        }
+    });
+});
+</script>

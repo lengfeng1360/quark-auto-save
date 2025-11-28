@@ -1,14 +1,10 @@
-<div class="container">
+<div class="container mt-5">
     <div class="row justify-content-center">
         <div class="col-md-8 text-center">
             <h1 class="display-4">Analyze Link</h1>
             <p class="lead">Quark Auto Save Integration</p>
-            <ul class="nav nav-pills justify-content-center my-4">
-                <li class="nav-item"><a href="#" class="nav-link active">1</a></li>
-                <li class="nav-item"><a href="#" class="nav-link">2</a></li>
-                <li class="nav-item"><a href="#" class="nav-link">3</a></li>
-            </ul>
-            <div class="card bg-dark text-white">
+            
+            <div class="card bg-dark text-white mt-4">
                 <div class="card-body">
                     <div class="mb-3">
                         <label for="shareLink" class="form-label">Paste share link here (e.g. https://pan.quark.cn/s/xxx code: 1234)</label>
@@ -26,3 +22,30 @@
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // This function will be called when the transfer page is shown
+    const populateShareUrl = () => {
+        const shareUrl = localStorage.getItem('shareUrlToTransfer');
+        if (shareUrl) {
+            const shareLinkTextarea = document.getElementById('shareLink');
+            if(shareLinkTextarea) {
+                shareLinkTextarea.value = shareUrl;
+                localStorage.removeItem('shareUrlToTransfer'); // Clean up after use
+            }
+        }
+    };
+
+    // We need a way to detect when this tab becomes visible.
+    // A simple way is to use a custom event dispatched from the main page.
+    document.body.addEventListener('showPage', function(e) {
+        if (e.detail.pageId === 'transfer') {
+            populateShareUrl();
+        }
+    });
+
+    // Also run on initial load in case it's the default page
+    populateShareUrl();
+});
+</script>
