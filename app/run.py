@@ -162,13 +162,21 @@ def logout():
 
 
 # 管理页面
-@app.route("/")
-def index():
+@app.route("/old_index")
+def old_index():
     if not is_login():
         return redirect(url_for("login"))
     return render_template(
         "index.html", version=app.config["APP_VERSION"], plugin_flags=PLUGIN_FLAGS
     )
+
+
+@app.route("/")
+@app.route("/<path:path>")
+def index(path="search"):
+    if not is_login():
+        return redirect(url_for("login"))
+    return render_template("new/index.html")
 
 
 # 获取配置数据
@@ -184,15 +192,34 @@ def get_data():
 
 
 # 更新数据
+def deep_merge(source, destination):
+    """
+    Recursively merges source dict into destination dict.
+    """
+    for key, value in source.items():
+        if isinstance(value, dict):
+            # get node or create one
+            node = destination.setdefault(key, {})
+            deep_merge(value, node)
+        else:
+            destination[key] = value
+    return destination
+
+
 @app.route("/update", methods=["POST"])
 def update():
     global config_data
     if not is_login():
         return jsonify({"success": False, "message": "未登录"})
+    
+    update_data = request.json
     dont_save_keys = ["task_plugins_config_default", "api_token"]
-    for key, value in request.json.items():
-        if key not in dont_save_keys:
-            config_data.update({key: value})
+    for key in dont_save_keys:
+        if key in update_data:
+            del update_data[key]
+
+    config_data = deep_merge(update_data, config_data)
+    
     Config.write_json(CONFIG_PATH, config_data)
     # 重新加载任务
     if reload_tasks():

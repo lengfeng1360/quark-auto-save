@@ -1,0 +1,120 @@
+{% extends "new/layout.html" %}
+{% block content %}
+<div class="container-fluid">
+    <div id="search" class="page">
+        {% include 'new/discovery.html' %}
+    </div>
+    <div id="transfer" class="page" style="display: none;">
+        {% include 'new/transfer.html' %}
+    </div>
+    <div id="library" class="page" style="display: none;">
+        {% include 'new/library.html' %}
+    </div>
+    <div id="config" class="page" style="display: none;">
+        {% include 'new/config.html' %}
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const pages = document.querySelectorAll('.page');
+        const navLinks = document.querySelectorAll('.nav-pills .nav-link');
+
+        function showPage(pageId) {
+            pages.forEach(page => {
+                page.style.display = page.id === pageId ? 'block' : 'none';
+            });
+            navLinks.forEach(link => {
+                if (link.getAttribute('href') === `#\${pageId}`) {
+                    link.classList.add('active');
+                } else {
+                    link.classList.remove('active');
+                }
+            });
+        }
+
+        navLinks.forEach(link => {
+            link.addEventListener('click', function(event) {
+                const pageId = this.getAttribute('href').substring(1);
+                if (document.getElementById(pageId)) {
+                    event.preventDefault();
+                    showPage(pageId);
+                    history.pushState(null, '', `/\${pageId}`);
+                }
+            });
+        });
+
+        const initialPage = window.location.pathname.substring(1) || 'search';
+        showPage(initialPage);
+
+        // Config page functionality
+        const openAlInput = document.getElementById('openAl');
+        const panSouApiUrlInput = document.getElementById('panSouApiUrl');
+        const saveConfigBtn = document.getElementById('saveConfigBtn');
+
+        // Fetch initial config data
+        axios.get('/data')
+            .then(response => {
+                if (response.data.success) {
+                    const config = response.data.data;
+                    if (config.plugins && config.plugins.alist) {
+                        openAlInput.value = config.plugins.alist.url || '';
+                    }
+                    if (config.source && config.source.pansou) {
+                        panSouApiUrlInput.value = config.source.pansou.server || '';
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching config data:', error);
+            });
+
+        // Save config data
+        saveConfigBtn.addEventListener('click', function() {
+            axios.get('/data')
+                .then(response => {
+                    if (response.data.success) {
+                        const config = response.data.data;
+
+                        // Defensively create objects if they don't exist
+                        if (!config.plugins) {
+                            config.plugins = {};
+                        }
+                        if (!config.plugins.alist) {
+                            config.plugins.alist = {};
+                        }
+                        config.plugins.alist.url = openAlInput.value;
+
+                        if (!config.source) {
+                            config.source = {};
+                        }
+                        if (!config.source.pansou) {
+                            config.source.pansou = {};
+                        }
+                        config.source.pansou.server = panSouApiUrlInput.value;
+
+                        console.log('Saving config:', JSON.stringify(config, null, 2)); // Debugging line
+                        axios.post('/update', config)
+                            .then(response => {
+                                if (response.data.success) {
+                                    alert('Configuration saved successfully!');
+                                } else {
+                                    alert('Failed to save configuration: ' + response.data.message);
+                                }
+                            })
+                            .catch(error => {
+                                console.error('Error saving config data:', error);
+                                alert('An error occurred while saving the configuration.');
+                            });
+                    } else {
+                        alert('Could not fetch current configuration before saving.');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching config data before saving:', error);
+                    alert('An error occurred while fetching the configuration.');
+                });
+        });
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,79 @@
+<style>
+    .library-sidebar {
+        background-color: #161B22;
+        padding: 20px;
+        height: calc(100vh - 70px);
+        border-right: 1px solid #30363D;
+    }
+    .library-content {
+        padding: 20px;
+        height: calc(100vh - 70px);
+        background-color: #0D1117;
+    }
+    .file-explorer {
+        background-color: #0D1117;
+        border: 1px solid #30363D;
+        border-radius: 6px;
+        padding: 16px;
+        color: #C9D1D9;
+    }
+    .file-explorer .list-group-item {
+        background-color: transparent;
+        border: none;
+        color: #C9D1D9;
+    }
+    .file-explorer .list-group-item i {
+        color: #8B949E;
+    }
+    .storage-usage {
+        margin-top: auto;
+    }
+    .progress-circle {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        background: conic-gradient(#0d6efd 75%, #30363D 0);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+</style>
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-3 library-sidebar">
+            <div class="file-explorer">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span><i class="bi bi-arrow-left"></i> root</span>
+                    <i class="bi bi-arrow-clockwise"></i>
+                </div>
+                <ul class="list-group">
+                    <li class="list-group-item"><i class="bi bi-folder me-2"></i> Movies</li>
+                    <li class="list-group-item"><i class="bi bi-folder me-2"></i> TV Shows</li>
+                    <li class="list-group-item"><i class="bi bi-folder me-2"></i> Downloads</li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-file-earmark-text me-2"></i> readme.txt</span>
+                        <span class="badge bg-secondary">2KB</span>
+                    </li>
+                </ul>
+            </div>
+            <div class="storage-usage mt-4">
+                <p>Storage Usage</p>
+                <div class="d-flex align-items-center">
+                    <div class="progress-circle me-3"></div>
+                    <div>
+                        <strong>400GB</strong> / 1TB
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-9 library-content">
+            <div class="d-flex justify-content-center align-items-center h-100">
+                <div class="text-center">
+                    <i class="bi bi-play-circle" style="font-size: 5rem; color: #8B949E;"></i>
+                    <p class="text-muted">Select a video to start watching</p>
+                    <p class="text-muted">Connects to Openlist</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
