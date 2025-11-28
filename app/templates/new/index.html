@@ -49,70 +49,33 @@
 
         // Config page functionality
         const openAlInput = document.getElementById('openAl');
-        const panSouApiUrlInput = document.getElementById('panSouApiUrl');
         const saveConfigBtn = document.getElementById('saveConfigBtn');
 
         // Fetch initial config data
-        axios.get('/data')
+        axios.get('/api/config/alist')
             .then(response => {
                 if (response.data.success) {
-                    const config = response.data.data;
-                    if (config.plugins && config.plugins.alist) {
-                        openAlInput.value = config.plugins.alist.url || '';
-                    }
-                    if (config.source && config.source.pansou) {
-                        panSouApiUrlInput.value = config.source.pansou.server || '';
-                    }
+                    openAlInput.value = response.data.data.url || '';
                 }
             })
             .catch(error => {
-                console.error('Error fetching config data:', error);
+                console.error('Error fetching Alist config data:', error);
             });
 
         // Save config data
         saveConfigBtn.addEventListener('click', function() {
-            axios.get('/data')
+            const newUrl = openAlInput.value;
+            axios.post('/api/config/alist', { url: newUrl })
                 .then(response => {
                     if (response.data.success) {
-                        const config = response.data.data;
-
-                        // Defensively create objects if they don't exist
-                        if (!config.plugins) {
-                            config.plugins = {};
-                        }
-                        if (!config.plugins.alist) {
-                            config.plugins.alist = {};
-                        }
-                        config.plugins.alist.url = openAlInput.value;
-
-                        if (!config.source) {
-                            config.source = {};
-                        }
-                        if (!config.source.pansou) {
-                            config.source.pansou = {};
-                        }
-                        config.source.pansou.server = panSouApiUrlInput.value;
-
-                        console.log('Saving config:', JSON.stringify(config, null, 2)); // Debugging line
-                        axios.post('/update', config)
-                            .then(response => {
-                                if (response.data.success) {
-                                    alert('Configuration saved successfully!');
-                                } else {
-                                    alert('Failed to save configuration: ' + response.data.message);
-                                }
-                            })
-                            .catch(error => {
-                                console.error('Error saving config data:', error);
-                                alert('An error occurred while saving the configuration.');
-                            });
+                        alert('Configuration saved successfully!');
                     } else {
-                        alert('Could not fetch current configuration before saving.');
+                        alert('Failed to save configuration: ' + response.data.message);
                     }
                 })
                 .catch(error => {
-                    console.error('Error fetching config data before saving:', error);
-                    alert('An error occurred while fetching the configuration.');
+                    console.error('Error saving Alist config data:', error);
+                    alert('An error occurred while saving the configuration.');
                 });
         });
     });

@@ -1,19 +1,14 @@
 <div class="container">
     <div class="row justify-content-center">
-        <div class="col-md-8">
+        <div class="col-md-6">
             <h1 class="display-4 text-center">System Configuration</h1>
-            <p class="lead text-center">Connect your deployed services. These URLs allow the dashboard to communicate with your backend tools.</p>
+            <p class="lead text-center">Connect your deployed Alist service. This URL allows the dashboard to communicate with your backend tools.</p>
             <div class="card bg-dark text-white">
                 <div class="card-body">
                     <div class="mb-3">
                         <label for="openAl" class="form-label">Open.in / Alist URL</label>
                         <input type="text" class="form-control bg-secondary text-white" id="openAl" placeholder="e.g. https://my-alist.herokuapp.com">
                         <small class="form-text text-muted">The root URL where your files are indexed.</small>
-                    </div>
-                    <div class="mb-3">
-                        <label for="panSouApiUrl" class="form-label">PanSou API URL</label>
-                        <input type="text" class="form-control bg-secondary text-white" id="panSouApiUrl" placeholder="e.g. https://so.252035.xyz">
-                        <small class="form-text text-muted">Link to your deployed PanSou/pansou instance. We will append /api/search to this URL.</small>
                     </div>
                     <button class="btn btn-primary w-100" type="button" id="saveConfigBtn">Save Configuration</button>
                 </div>

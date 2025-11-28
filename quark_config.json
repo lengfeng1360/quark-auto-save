@@ -10,6 +10,9 @@
     "emby": {
       "url": "",
       "token": ""
+    },
+    "alist": {
+      "url": ""
     }
   },
   "magic_regex": {

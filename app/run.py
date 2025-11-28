@@ -511,6 +511,30 @@ def add_task():
     )
 
 
+# API for new config page
+@app.route("/api/config/alist", methods=["GET"])
+def get_alist_config():
+    if not is_login():
+        return jsonify({"success": False, "message": "未登录"})
+    alist_url = config_data.get("plugins", {}).get("alist", {}).get("url", "")
+    return jsonify({"success": True, "data": {"url": alist_url}})
+
+
+@app.route("/api/config/alist", methods=["POST"])
+def update_alist_config():
+    global config_data
+    if not is_login():
+        return jsonify({"success": False, "message": "未登录"})
+    
+    new_url = request.json.get("url", "")
+    
+    config_data.setdefault("plugins", {}).setdefault("alist", {})["url"] = new_url
+    
+    Config.write_json(CONFIG_PATH, config_data)
+    
+    logging.info(f">>> Alist URL 更新成功: {new_url}")
+    return jsonify({"success": True, "message": "Alist URL 更新成功"})
+
 # 定时任务执行的函数
 def run_python(args):
     logging.info(f">>> 定时运行任务")
