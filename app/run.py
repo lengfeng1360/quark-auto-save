@@ -173,7 +173,7 @@ def old_index():
 
 @app.route("/")
 @app.route("/<path:path>")
-def index(path="search"):
+def index(path=""):
     if not is_login():
         return redirect(url_for("login"))
     return render_template("new/index.html")
@@ -357,8 +357,13 @@ def get_share_detail():
         return jsonify({"success": False, "message": "未登录"})
     shareurl = request.json.get("shareurl", "")
     stoken = request.json.get("stoken", "")
+    pdir_fid = request.json.get("pdir_fid", 0)
+    pwd_id = request.json.get("pwd_id", "")
     account = Quark()
-    pwd_id, passcode, pdir_fid, paths = account.extract_url(shareurl)
+    if shareurl:
+        pwd_id, passcode, pdir_fid, paths = account.extract_url(shareurl)
+    else:
+        passcode, paths = "", []
     if not stoken:
         get_stoken = account.get_stoken(pwd_id, passcode)
         if get_stoken.get("status") == 200:
@@ -382,6 +387,7 @@ def get_share_detail():
         for i in share_detail["data"].get("full_path", [])
     ] or paths
     data["stoken"] = stoken
+    data["pwd_id"] = pwd_id
 
     # 正则处理预览
     def preview_regex(data):
@@ -480,6 +486,76 @@ def delete_file():
     else:
         response = {"success": False, "message": "缺失必要字段: fid"}
     return jsonify(response)
+@app.route("/api/transfer", methods=["POST"])
+def transfer_files():
+    if not is_login():
+        return jsonify({"success": False, "message": "未登录"})
+    
+    data = request.json
+    fids = data.get("fids", [])
+    fid_tokens = data.get("fid_tokens", [])
+    stoken = data.get("stoken", "")
+    pwd_id = data.get("pwd_id", "")
+    save_path = data.get("save_path", "/")
+    
+    if not fids or not stoken or not pwd_id:
+        return jsonify({"success": False, "message": "Missing required parameters: fids, stoken, or pwd_id"})
+
+    if len(fids) != len(fid_tokens):
+        return jsonify({"success": False, "message": "Mismatch between fids and fid_tokens count"})
+
+    account = Quark(config_data["cookie"][0])
+    
+    # 1. 获取或创建保存路径 ID
+    save_path = re.sub(r"/{2,}", "/", f"/{save_path}")
+    if save_path == "/":
+         to_pdir_fid = "0"
+    else:
+        get_fids = account.get_fids([save_path])
+        if get_fids:
+            to_pdir_fid = get_fids[0]["fid"]
+        else:
+            # 尝试创建
+            mkdir_res = account.mkdir(save_path)
+            if mkdir_res["code"] == 0:
+                to_pdir_fid = mkdir_res["data"]["fid"]
+            else:
+                return jsonify({"success": False, "message": f"Create save path failed: {mkdir_res.get('message')}"})
+            
+    # 2. 执行转存
+    total_success = 0
+    errors = []
+    
+    batch_size = 50 # 稍微保守一点
+    for i in range(0, len(fids), batch_size):
+        batch_fids = fids[i:i + batch_size]
+        batch_tokens = fid_tokens[i:i + batch_size]
+        
+        try:
+            res = account.save_file(batch_fids, batch_tokens, to_pdir_fid, pwd_id, stoken)
+            if res["code"] == 0:
+                task_id = res["data"]["task_id"]
+                task_status = account.query_task(task_id)
+                if task_status["code"] == 0:
+                     # 检查是否有 save_as_top_fids (表示成功的部分)
+                     if task_status["data"] and task_status["data"].get("save_as"):
+                         total_success += len(task_status["data"]["save_as"].get("save_as_top_fids", []))
+                     else:
+                         # 假设全部成功如果没报错
+                         total_success += len(batch_fids)
+                else:
+                    errors.append(f"Batch {i//batch_size + 1} task query failed: {task_status.get('message')}")
+            else:
+                 errors.append(f"Batch {i//batch_size + 1} save failed: {res.get('message')}")
+        except Exception as e:
+            logging.error(traceback.format_exc())
+            errors.append(f"Batch {i//batch_size + 1} error: {str(e)}")
+            
+    if len(errors) == 0:
+        return jsonify({"success": True, "message": f"Successfully transferred {total_success} items."})
+    else:
+        msg = f"Completed with errors. Success: {total_success}. Errors: {'; '.join(errors)}"
+        return jsonify({"success": False, "message": msg})
 
 
 # 添加任务接口
@@ -510,30 +586,6 @@ def add_task():
         {"success": True, "code": 0, "message": "任务添加成功", "data": request_data}
     )
 
-
-# API for new config page
-@app.route("/api/config/alist", methods=["GET"])
-def get_alist_config():
-    if not is_login():
-        return jsonify({"success": False, "message": "未登录"})
-    alist_url = config_data.get("plugins", {}).get("alist", {}).get("url", "")
-    return jsonify({"success": True, "data": {"url": alist_url}})
-
-
-@app.route("/api/config/alist", methods=["POST"])
-def update_alist_config():
-    global config_data
-    if not is_login():
-        return jsonify({"success": False, "message": "未登录"})
-    
-    new_url = request.json.get("url", "")
-    
-    config_data.setdefault("plugins", {}).setdefault("alist", {})["url"] = new_url
-    
-    Config.write_json(CONFIG_PATH, config_data)
-    
-    logging.info(f">>> Alist URL 更新成功: {new_url}")
-    return jsonify({"success": True, "message": "Alist URL 更新成功"})
 
 # 定时任务执行的函数
 def run_python(args):

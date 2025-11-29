@@ -1,22 +1,130 @@
-<div class="container mt-5">
-    <div class="row justify-content-center">
-        <div class="col-md-8 text-center">
-            <h1 class="display-4">Analyze Link</h1>
-            <p class="lead">Quark Auto Save Integration</p>
-            
-            <div class="card bg-dark text-white mt-4">
-                <div class="card-body">
+<style>
+    /* Fix checkbox visibility in dark theme */
+    .form-check-input {
+        background-color: #495057;
+        border-color: #6c757d;
+    }
+    
+    .form-check-input:checked {
+        background-color: #0d6efd;
+        border-color: #0d6efd;
+    }
+    
+    .form-check-input:focus {
+        border-color: #86b7fe;
+        outline: 0;
+        box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+    }
+    
+    /* Ensure proper contrast for text in results */
+    .list-group-item {
+        background-color: #212529;
+        border-color: #373b3e; /* Softer border */
+        transition: background-color 0.2s;
+    }
+    
+    .list-group-item:hover {
+        background-color: #2c3034;
+    }
+
+    /* File Tree Styles */
+    .file-tree-item {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        overflow: hidden;
+    }
+
+    .file-name-wrapper {
+        display: flex;
+        align-items: center;
+        flex-grow: 1;
+        min-width: 0; /* Allows text truncation to work in flex child */
+        cursor: pointer;
+        padding-right: 10px;
+        user-select: none;
+    }
+
+    .file-name-text {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .toggle-icon-area {
+        width: 24px;
+        flex-shrink: 0;
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    /* Custom Scrollbar */
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: #212529;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #495057;
+        border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #6c757d;
+    }
+</style>
+
+<div class="container mt-4">
+    <!-- Input Card Section -->
+    <div class="row justify-content-center mb-4">
+        <!-- Adjusted column size for better centering on large screens -->
+        <div class="col-lg-10 col-xl-8">
+            <div class="card bg-dark text-white border-secondary shadow-sm">
+                <div class="card-body p-4">
+                    <h5 class="card-title mb-3"><i class="bi bi-link-45deg"></i> Parse Share Link</h5>
                     <div class="mb-3">
-                        <label for="shareLink" class="form-label">Paste share link here (e.g. https://pan.quark.cn/s/xxx code: 1234)</label>
-                        <textarea class="form-control bg-secondary text-white" id="shareLink" rows="3"></textarea>
+                        <textarea class="form-control bg-secondary text-white border-0" id="shareLink" rows="2" placeholder="Paste share link here (e.g. https://pan.quark.cn/s/xxx code: 1234)"></textarea>
                     </div>
-                    <div class="form-check mb-3">
-                        <input class="form-check-input" type="checkbox" id="geminiPoweredParsing">
-                        <label class="form-check-label" for="geminiPoweredParsing">
-                            GEMINI POWERED PARSING
-                        </label>
+                    <button id="analyzeButton" class="btn btn-primary w-100" type="button"><i class="bi bi-arrow-down-up"></i> Analyze & Fetch</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="text-center mt-4" style="display: none;">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+
+    <!-- Error Message -->
+    <div id="errorMessageContainer" class="row justify-content-center mt-4" style="display: none;">
+        <div class="col-md-6">
+            <div id="errorMessage" class="alert alert-danger" role="alert"></div>
+        </div>
+    </div>
+
+    <!-- Results Section -->
+    <div id="transferResultsSection" class="row justify-content-center mt-4" style="display: none;">
+        <div class="col-lg-10 col-xl-8">
+            <div class="card bg-dark text-white border-secondary shadow-sm">
+                <div class="card-header border-secondary d-flex justify-content-between align-items-center bg-dark">
+                    <h5 class="mb-0"><i class="bi bi-folder2-open"></i> File List</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div id="transferResultsContainer" class="text-start custom-scrollbar" style="max-height: 500px; overflow-y: auto;">
                     </div>
-                    <button class="btn btn-primary w-100" type="button"><i class="bi bi-arrow-down-up"></i> Analyze & Fetch</button>
+                </div>
+                <div class="card-footer border-secondary bg-dark">
+                    <div class="input-group mb-2">
+                         <span class="input-group-text bg-secondary text-white border-secondary">Save To</span>
+                         <input type="text" class="form-control bg-dark text-white border-secondary" id="savePathInput" placeholder="/ (Root Directory) or /MyFolder" value="/">
+                    </div>
+                    <div id="transferActions" class="d-flex justify-content-end">
+                        <button id="transferButton" class="btn btn-success" type="button"><i class="bi bi-cloud-download"></i> Transfer Selected</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -33,6 +141,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if(shareLinkTextarea) {
                 shareLinkTextarea.value = shareUrl;
                 localStorage.removeItem('shareUrlToTransfer'); // Clean up after use
+                // Trigger analysis automatically
+                const analyzeBtn = document.getElementById('analyzeButton');
+                if (analyzeBtn) {
+                     setTimeout(() => analyzeBtn.click(), 100);
+                }
             }
         }
     };
@@ -45,7 +158,318 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Also run on initial load in case it's the default page
+    // Load default save path from config
+    const loadDefaultSavePath = () => {
+        axios.get('/data')
+            .then(response => {
+                if(response.data.success) {
+                    const defaultPath = response.data.data.save_path_default;
+                    const savePathInput = document.getElementById('savePathInput');
+                    if(defaultPath && savePathInput) {
+                        savePathInput.value = defaultPath;
+                    }
+                }
+            })
+            .catch(error => console.error("Failed to load config:", error));
+    };
+    loadDefaultSavePath();
+
+    const analyzeButton = document.getElementById('analyzeButton');
+    const shareLinkTextarea = document.getElementById('shareLink');
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    const errorMessage = document.getElementById('errorMessage');
+    const resultsContainer = document.getElementById('transferResultsContainer');
+    const transferActions = document.getElementById('transferActions');
+    const transferButton = document.getElementById('transferButton');
+
+    let currentShareData = {};
+
+    const analyzeAndFetch = () => {
+        const shareUrl = shareLinkTextarea.value.trim();
+        if (!shareUrl) {
+            errorMessage.textContent = 'Please paste a share link.';
+            document.getElementById('errorMessageContainer').style.display = 'block';
+            return;
+        }
+
+        loadingSpinner.style.display = 'block';
+        document.getElementById('errorMessageContainer').style.display = 'none';
+        document.getElementById('transferResultsSection').style.display = 'none';
+        resultsContainer.innerHTML = '';
+
+        axios.post('/get_share_detail', { shareurl: shareUrl })
+            .then(response => {
+                loadingSpinner.style.display = 'none';
+                if (response.data.success) {
+                    currentShareData = {
+                        stoken: response.data.data.stoken,
+                        shareId: response.data.data.share_id,
+                        pwd_id: response.data.data.pwd_id,
+                        originalShareUrl: shareUrl
+                    };
+                    transferActions.style.display = 'block';
+                    document.getElementById('transferResultsSection').style.display = 'block';
+                    renderResults(response.data.data, resultsContainer, true);
+                    // If the root is a single folder, expand it immediately
+                    if (response.data.data.list.length === 1 && response.data.data.list.dir) {
+                        const firstFolderElement = resultsContainer.querySelector('.list-group-item span[style*="cursor: pointer"]');
+                        if(firstFolderElement) {
+                            firstFolderElement.click();
+                        }
+                    }
+                } else {
+                    transferActions.style.display = 'none';
+                    errorMessage.textContent = response.data.data.error || 'Failed to analyze the link.';
+                    document.getElementById('errorMessageContainer').style.display = 'block';
+                }
+            })
+            .catch(error => {
+                loadingSpinner.style.display = 'none';
+                console.error('Error fetching details:', error);
+                errorMessage.textContent = 'An error occurred while fetching details.';
+                document.getElementById('errorMessageContainer').style.display = 'block';
+            });
+    };
+
+    const getShareUrlForFid = (originalUrl, fid) => {
+        // This logic is borrowed from the original index.html's getShareurl method
+        let baseUrl = originalUrl.match(`.*s/[a-z0-9]+(\\?pwd=[^#]+)?`);
+        if (fid === '0') {
+            return baseUrl;
+        }
+        return `${baseUrl}#/list/share/${fid}`;
+    };
+
+    const fetchAndRenderDirectory = (pdirFid, container) => {
+        loadingSpinner.style.display = 'block';
+        
+        const newShareUrl = getShareUrlForFid(currentShareData.originalShareUrl, pdirFid);
+
+        axios.post('/get_share_detail', {
+            shareurl: newShareUrl,
+            stoken: currentShareData.stoken // stoken is still needed
+        })
+        .then(response => {
+            loadingSpinner.style.display = 'none';
+            if (response.data.success) {
+                // Update stoken in case it gets refreshed
+                currentShareData.stoken = response.data.data.stoken;
+                renderResults(response.data.data, container, false);
+            } else {
+                // Show error inside the folder's container
+                container.innerHTML = `<li class="list-group-item bg-dark text-danger">Error: ${response.data.data.error}</li>`;
+            }
+        })
+        .catch(error => {
+            loadingSpinner.style.display = 'none';
+            console.error('Error fetching directory details:', error);
+            container.innerHTML = `<li class="list-group-item bg-dark text-danger">An error occurred.</li>`;
+        });
+    };
+
+    const renderResults = (data, container, isRoot) => {
+        if (isRoot) {
+            container.innerHTML = '';
+        }
+        let fileList = data.list;
+        // Handle case where the share is a folder, list is empty but first_file exists.
+        if (isRoot && (!fileList || fileList.length === 0) && data.first_file && data.first_file.fid) {
+             const singleFile = {
+                 ...data.share,
+                 ...data.first_file,
+                 file_name: data.share.file_name || 'Unnamed File',
+                 dir: true // It's a directory
+             };
+             fileList = [singleFile];
+        } else if (isRoot && (!fileList || fileList.length === 0) && data.share && data.share.file_name) {
+            const singleFile = {
+                ...data.share,
+                file_name: data.share.file_name || 'Unnamed File',
+                dir: false,
+            };
+            fileList = [singleFile];
+        }
+        if (!fileList || fileList.length === 0) {
+            const emptyMessage = document.createElement('li');
+            emptyMessage.className = 'list-group-item bg-dark text-white';
+            emptyMessage.textContent = 'This folder is empty.';
+            container.appendChild(emptyMessage);
+            return;
+        }
+
+        const listGroup = document.createElement('ul');
+        listGroup.className = `list-group list-group-flush ${isRoot ? '' : 'ms-3 border-start border-secondary'}`;
+
+        fileList.forEach(file => {
+            const listItem = document.createElement('li');
+            listItem.className = 'list-group-item bg-dark text-white px-3 py-2 border-bottom border-secondary';
+            listItem.style.borderColor = '#373b3e';
+
+            const row = document.createElement('div');
+            row.className = 'file-tree-item';
+
+            // Checkbox
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'form-check-input me-3';
+            checkbox.dataset.fid = file.fid;
+            checkbox.dataset.fidToken = file.share_fid_token;
+            checkbox.onchange = (e) => {
+                const isChecked = e.target.checked;
+                const subContainer = listItem.querySelector('.sub-container');
+                if (subContainer) {
+                    const childCheckboxes = subContainer.querySelectorAll('input[type="checkbox"]');
+                    childCheckboxes.forEach(child => child.checked = isChecked);
+                }
+            };
+            row.appendChild(checkbox);
+
+            // Wrapper for Name and Icon to handle clicks and layout
+            const fileNameWrapper = document.createElement('div');
+            fileNameWrapper.className = 'file-name-wrapper';
+            
+            // Icon Determination
+            let iconClass = 'bi-file-earmark';
+            let iconColor = 'text-secondary';
+            if (file.dir) {
+                iconClass = 'bi-folder-fill';
+                iconColor = 'text-warning';
+            } else if (file.obj_category === 'video') {
+                iconClass = 'bi-film';
+                iconColor = 'text-info';
+            } else if (file.obj_category === 'image') {
+                iconClass = 'bi-image';
+                iconColor = 'text-success';
+            } else if (file.obj_category === 'audio') {
+                iconClass = 'bi-music-note-beamed';
+                iconColor = 'text-danger';
+            }
+
+            // Toggle Icon Area (Arrow)
+            const toggleIconArea = document.createElement('span');
+            toggleIconArea.className = 'toggle-icon-area me-1';
+            
+            // Toggle Icon element (we create it but only populate useful content if dir)
+            const toggleIcon = document.createElement('i');
+            toggleIcon.className = 'toggle-icon bi';
+            
+             if (file.dir) {
+                toggleIcon.classList.add('bi-caret-right-fill', 'text-muted');
+                toggleIconArea.appendChild(toggleIcon);
+            }
+            fileNameWrapper.appendChild(toggleIconArea);
+
+            // File Type Icon
+            const fileIcon = document.createElement('i');
+            fileIcon.className = `bi ${iconClass} ${iconColor} me-2 fs-5`;
+            fileNameWrapper.appendChild(fileIcon);
+
+            // File Name Text
+            const fileNameText = document.createElement('span');
+            fileNameText.className = 'file-name-text';
+            fileNameText.textContent = file.file_name;
+            fileNameText.title = file.file_name;
+            fileNameWrapper.appendChild(fileNameText);
+
+            // Click Event for Directory
+            if (file.dir) {
+                fileNameWrapper.onclick = (e) => {
+                    e.stopPropagation();
+                    const subContainer = listItem.querySelector('.sub-container');
+                   
+                    if (subContainer) {
+                        const isHidden = subContainer.style.display === 'none';
+                        subContainer.style.display = isHidden ? 'block' : 'none';
+                        if (isHidden) {
+                            toggleIcon.classList.remove('bi-caret-right-fill');
+                            toggleIcon.classList.add('bi-caret-down-fill');
+                        } else {
+                             toggleIcon.classList.remove('bi-caret-down-fill');
+                            toggleIcon.classList.add('bi-caret-right-fill');
+                        }
+                    } else {
+                        toggleIcon.classList.remove('bi-caret-right-fill');
+                        toggleIcon.classList.add('bi-caret-down-fill');
+                        
+                        const newSubContainer = document.createElement('div');
+                        newSubContainer.className = 'sub-container mt-2';
+                        listItem.appendChild(newSubContainer);
+                        fetchAndRenderDirectory(file.fid, newSubContainer);
+                    }
+                };
+            }
+
+            row.appendChild(fileNameWrapper);
+
+            // Size Badge
+            const sizeBadge = document.createElement('span');
+            sizeBadge.className = 'badge bg-dark border border-secondary text-secondary ms-2 font-monospace';
+            sizeBadge.textContent = file.size ? formatBytes(file.size) : (file.dir ? '-' : '0 B');
+            
+            row.appendChild(sizeBadge);
+            listItem.appendChild(row);
+            listGroup.appendChild(listItem);
+        });
+
+        container.appendChild(listGroup);
+    };
+
+    const formatBytes = (bytes, decimals = 2) => {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    };
+
+    const handleTransfer = () => {
+        const selectedCheckboxes = resultsContainer.querySelectorAll('input[type="checkbox"]:checked');
+        const fidsToTransfer = Array.from(selectedCheckboxes).map(cb => cb.dataset.fid);
+        const fidTokensToTransfer = Array.from(selectedCheckboxes).map(cb => cb.dataset.fidToken);
+        const savePath = document.getElementById('savePathInput').value.trim() || '/';
+
+        if (fidsToTransfer.length === 0) {
+            alert('Please select at least one file or folder to transfer.');
+            return;
+        }
+
+        loadingSpinner.style.display = 'block';
+        transferButton.disabled = true;
+
+        axios.post('/api/transfer', {
+            fids: fidsToTransfer,
+            fid_tokens: fidTokensToTransfer,
+            stoken: currentShareData.stoken,
+            pwd_id: currentShareData.pwd_id, // Make sure pwd_id is available in currentShareData
+            save_path: savePath
+        })
+        .then(response => {
+            loadingSpinner.style.display = 'none';
+            transferButton.disabled = false;
+            
+            if (response.data.success) {
+                alert(response.data.message);
+                // Optional: Uncheck all or refresh
+            } else {
+                alert('Transfer Failed: ' + response.data.message);
+                if(response.data.errors) {
+                    console.error(response.data.errors);
+                }
+            }
+        })
+        .catch(error => {
+             loadingSpinner.style.display = 'none';
+             transferButton.disabled = false;
+             console.error('Error during transfer:', error);
+             alert('An unexpected error occurred.');
+        });
+    };
+
+    analyzeButton.addEventListener('click', analyzeAndFetch);
+    transferButton.addEventListener('click', handleTransfer);
+
+    // Initial check after listeners are set up
     populateShareUrl();
 });
 </script>

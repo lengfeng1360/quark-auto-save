@@ -88,6 +88,21 @@
 
             <div class="row title">
               <div class="col">
+                <h2 style="display: inline-block;"><i class="bi bi-folder2-open"></i> 全局设置</h2>
+              </div>
+            </div>
+            <div class="input-group mb-2">
+              <div class="input-group-prepend">
+                <span class="input-group-text">默认存储路径</span>
+              </div>
+              <input type="text" v-model="formData.save_path_default" class="form-control" placeholder="新建任务时的默认保存路径">
+              <div class="input-group-append">
+                <button class="btn btn-outline-secondary" type="button" @click="fileSelect.sortBy='file_name';fileSelect.sortOrder='asc';showSavepathSelect('DEFAULT_PATH')">选择</button>
+              </div>
+            </div>
+
+            <div class="row title">
+              <div class="col">
                 <h2 style="display: inline-block;"><i class="bi bi-clock"></i> 定时规则</h2>
                 <span class="badge badge-pill badge-light">
                   <a target="_blank" href="https://tool.lu/crontab/" title="CRON时间计算器">?</a>
@@ -767,7 +782,14 @@
                   enable: ""
                 };
               }
+              if (!config_data.save_path_default) {
+                config_data.save_path_default = "";
+              }
               this.formData = config_data;
+              // 设置新建任务的默认路径
+              if (this.formData.save_path_default) {
+                  this.newTask.savepath = this.formData.save_path_default;
+              }
               setTimeout(() => {
                 this.configModified = false;
               }, 100);
@@ -1121,8 +1143,24 @@
           this.fileSelect.paths = [];
           this.fileSelect.index = index;
           $('#fileSelectModal').modal('toggle');
-          this.formData.tasklist[index].savepath = this.formData.tasklist[index].savepath.replace(/\/+/g, "/");
-          this.getSavepathDetail(this.formData.tasklist[index].savepath);
+
+          let currentPath = "/";
+          if (index === 'DEFAULT_PATH') {
+             if (!this.formData.save_path_default) this.formData.save_path_default = "/";
+             currentPath = this.formData.save_path_default;
+          } else {
+             currentPath = this.formData.tasklist[index].savepath;
+          }
+
+          currentPath = currentPath.replace(/\/+/g, "/");
+          
+          if (index === 'DEFAULT_PATH') {
+              this.formData.save_path_default = currentPath;
+          } else {
+              this.formData.tasklist[index].savepath = currentPath;
+          }
+
+          this.getSavepathDetail(currentPath);
         },
         getShareDetail() {
           this.modalLoading = true;
@@ -1203,9 +1241,15 @@
             this.formData.tasklist[this.fileSelect.index].shareurl_ban = undefined;
             this.formData.tasklist[this.fileSelect.index].shareurl = this.fileSelect.shareurl;
           } else {
-            this.formData.tasklist[this.fileSelect.index].savepath = "/" + this.fileSelect.paths.map(item => item.name).join("/");
-            if (addTaskname) {
-              this.formData.tasklist[this.fileSelect.index].savepath += "/" + this.formData.tasklist[this.fileSelect.index].taskname
+            const newPath = "/" + this.fileSelect.paths.map(item => item.name).join("/");
+            
+            if (this.fileSelect.index === 'DEFAULT_PATH') {
+                this.formData.save_path_default = newPath;
+            } else {
+                this.formData.tasklist[this.fileSelect.index].savepath = newPath;
+                if (addTaskname) {
+                  this.formData.tasklist[this.fileSelect.index].savepath += "/" + this.formData.tasklist[this.fileSelect.index].taskname
+                }
             }
           }
           $('#fileSelectModal').modal('hide')

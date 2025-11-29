@@ -157,10 +157,11 @@ document.addEventListener('DOMContentLoaded', function () {
             transferButton.title = 'Send to Transfer';
             transferButton.onclick = () => {
                 localStorage.setItem('shareUrlToTransfer', item.shareurl);
-                window.location.hash = '#transfer';
-                const navLink = document.querySelector('a.nav-link[href="#transfer"]');
+                const navLink = document.querySelector('a.nav-link[data-page="transfer"]');
                 if (navLink) {
                     navLink.click();
+                    // Scroll to top
+                    window.scrollTo(0, 0);
                 }
             };
             
