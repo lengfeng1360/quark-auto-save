@@ -179,9 +179,9 @@ def index(path=""):
     return render_template("new/index.html")
 
 
-# 获取配置数据
-@app.route("/data")
-def get_data():
+# 获取配置数据 (仅限管理员使用，不要在非管理页面调用)
+@app.route("/api/admin/config")
+def get_admin_data():
     if not is_login():
         return jsonify({"success": False, "message": "未登录"})
     data = Config.read_json(CONFIG_PATH)
@@ -189,6 +189,16 @@ def get_data():
     data["api_token"] = get_login_token()
     data["task_plugins_config_default"] = task_plugins_config_default
     return jsonify({"success": True, "data": data})
+@app.route("/api/public_config")
+def get_public_config():
+    if not is_login():
+        return jsonify({"success": False, "message": "未登录"})
+    data = {
+        "version": app.config["APP_VERSION"],
+        "save_path_default": config_data.get("save_path_default", "/")
+    }
+    return jsonify({"success": True, "data": data})
+
 
 
 # 更新数据

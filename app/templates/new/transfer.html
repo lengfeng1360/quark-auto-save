@@ -159,7 +159,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Load default save path from config
     const loadDefaultSavePath = () => {
-        axios.get('/data')
+        axios.get('/api/public_config')
             .then(response => {
                 if(response.data.success) {
                     const defaultPath = response.data.data.save_path_default;

@@ -740,7 +740,7 @@
             });
         },
         fetchData() {
-          axios.get('/data')
+          axios.get('/api/admin/config')
             .then(response => {
               config_data = response.data.data
               // cookie兼容
