@@ -78,8 +78,7 @@
 <div class="container mt-4">
     <!-- Input Card Section -->
     <div class="row justify-content-center mb-4">
-        <!-- Adjusted column size for better centering on large screens -->
-        <div class="col-lg-10 col-xl-8">
+        <div class="col-lg-8 mx-auto">
             <div class="card bg-dark text-white border-secondary shadow-sm">
                 <div class="card-body p-4">
                     <h5 class="card-title mb-3"><i class="bi bi-link-45deg"></i> Parse Share Link</h5>
@@ -108,10 +107,10 @@
 
     <!-- Results Section -->
     <div id="transferResultsSection" class="row justify-content-center mt-4" style="display: none;">
-        <div class="col-lg-10 col-xl-8">
+        <div class="col-lg-8 mx-auto">
             <div class="card bg-dark text-white border-secondary shadow-sm">
                 <div class="card-header border-secondary d-flex justify-content-between align-items-center bg-dark">
-                    <h5 class="mb-0"><i class="bi bi-folder2-open"></i> File List</h5>
+                    <h5 class="mb-0 mx-auto"><i class="bi bi-folder2-open"></i> File List</h5>
                 </div>
                 <div class="card-body p-0">
                     <div id="transferResultsContainer" class="text-start custom-scrollbar" style="max-height: 500px; overflow-y: auto;">
@@ -219,14 +218,22 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 } else {
                     transferActions.style.display = 'none';
-                    errorMessage.textContent = response.data.data.error || 'Failed to analyze the link.';
+                    // Try to get error message from different possible fields
+                    const errorMsg = response.data.data?.error || response.data.message || 'Failed to analyze the link.';
+                    errorMessage.textContent = errorMsg;
                     document.getElementById('errorMessageContainer').style.display = 'block';
                 }
             })
             .catch(error => {
                 loadingSpinner.style.display = 'none';
                 console.error('Error fetching details:', error);
-                errorMessage.textContent = 'An error occurred while fetching details.';
+                let msg = 'An error occurred while fetching details.';
+                if (error.response && error.response.data && error.response.data.message) {
+                    msg += ' ' + error.response.data.message;
+                } else if (error.message) {
+                     msg += ' ' + error.message;
+                }
+                errorMessage.textContent = msg;
                 document.getElementById('errorMessageContainer').style.display = 'block';
             });
     };
