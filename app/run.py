@@ -568,6 +568,178 @@ def transfer_files():
         return jsonify({"success": False, "message": msg})
 
 
+# Library 相关 API
+@app.route("/api/library/storage_info")
+def get_storage_info():
+    if not is_login():
+        return jsonify({"success": False, "message": "未登录"})
+    
+    try:
+        alist_config = config_data.get("plugins", {}).get("alist", {})
+        if not alist_config.get("url") or not alist_config.get("token"):
+            return jsonify({"success": False, "message": "Alist 未配置"})
+        
+        # 获取存储信息
+        url = f"{alist_config['url']}/api/admin/storage/list"
+        headers = {"Authorization": alist_config['token']}
+        logging.info(f"Getting storage info from: {url}")
+        response = requests.get(url, headers=headers)
+        logging.info(f"Storage info response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("code") == 200:
+                storage_list = data.get("data", [])
+                quark_storage = None
+                for storage in storage_list:
+                    if storage.get("driver") == "Quark":
+                        quark_storage = storage
+                        break
+               
+                if quark_storage:
+                    return jsonify({
+                        "success": True,
+                        "data": {
+                            "storage": quark_storage
+                        }
+                    })
+                else:
+                    return jsonify({
+                        "success": False,
+                        "message": "未找到 Quark 存储驱动"
+                    })
+        
+        return jsonify({"success": False, "message": "获取存储信息失败"})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+@app.route("/api/library/fs/list", methods=["POST"])
+def get_fs_list():
+    if not is_login():
+        return jsonify({"success": False, "message": "未登录"})
+    
+    try:
+        data = request.json
+        path = data.get("path", "/")
+        refresh = data.get("refresh", False)
+        
+        alist_config = config_data.get("plugins", {}).get("alist", {})
+        if not alist_config.get("url") or not alist_config.get("token"):
+            return jsonify({"success": False, "message": "Alist 未配置"})
+        
+        # 获取文件列表
+        url = f"{alist_config['url']}/api/fs/list"
+        headers = {"Authorization": alist_config['token']}
+        payload = {
+            "path": path,
+            "refresh": refresh,
+            "password": "",
+            "page": 1,
+            "per_page": 0,
+        }
+        
+        logging.info(f"Getting file list from: {url}, path: {path}")
+        response = requests.post(url, headers=headers, json=payload)
+        logging.info(f"File list response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("code") == 200:
+                return jsonify({"success": True, "data": result.get("data", {})})
+        
+        return jsonify({"success": False, "message": result.get("message", "获取文件列表失败")})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+@app.route("/api/library/fs/get", methods=["POST"])
+def get_file_info():
+    if not is_login():
+        return jsonify({"success": False, "message": "未登录"})
+    
+    try:
+        data = request.json
+        path = data.get("path", "")
+        password = data.get("password", "")
+        
+        alist_config = config_data.get("plugins", {}).get("alist", {})
+        if not alist_config.get("url") or not alist_config.get("token"):
+            return jsonify({"success": False, "message": "Alist 未配置"})
+        
+        # 获取文件信息
+        url = f"{alist_config['url']}/api/fs/get"
+        headers = {"Authorization": alist_config['token']}
+        payload = {
+            "path": path,
+            "password": password,
+        }
+        
+        response = requests.post(url, headers=headers, json=payload)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("code") == 200:
+                return jsonify({"success": True, "data": result.get("data", {})})
+        
+        return jsonify({"success": False, "message": result.get("message", "获取文件信息失败")})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+@app.route("/api/library/fs/download", methods=["GET", "POST"])
+def get_download_url():
+    if not is_login():
+        return jsonify({"success": False, "message": "未登录"})
+    
+    try:
+        # 支持 GET 和 POST 两种方法
+        if request.method == "GET":
+            path = request.args.get("path", "")
+        else:
+            data = request.json
+            path = data.get("path", "")
+        
+        alist_config = config_data.get("plugins", {}).get("alist", {})
+        if not alist_config.get("url") or not alist_config.get("token"):
+            return jsonify({"success": False, "message": "Alist 未配置"})
+        
+        # 首先使用 POST 方法获取文件信息，包含 raw_url
+        get_url = f"{alist_config['url']}/api/fs/get"
+        headers = {"Authorization": alist_config['token']}
+        payload = {
+            "path": path,
+            "password": ""
+        }
+        
+        logging.info(f"Getting file info from: {get_url}, path: {path}")
+        response = requests.post(get_url, headers=headers, json=payload)
+        logging.info(f"File info response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            logging.info(f"File info response: {result}")
+            if result.get("code") == 200:
+                raw_url = result.get("data", {}).get("raw_url", "")
+                if raw_url:
+                    return jsonify({"success": True, "data": {"download_url": raw_url}})
+                else:
+                    # 如果没有 raw_url，尝试使用下载接口
+                    download_url = f"{alist_config['url']}/api/fs/download"
+                    params = {"path": path}
+                    
+                    logging.info(f"Getting download URL from: {download_url}")
+                    download_response = requests.get(download_url, headers=headers, params=params)
+                    
+                    if download_response.status_code == 200:
+                        download_result = download_response.json()
+                        if download_result.get("code") == 200:
+                            download_url = download_result.get("data", {}).get("raw_url", "")
+                            if download_url:
+                                return jsonify({"success": True, "data": {"download_url": download_url}})
+        
+        return jsonify({"success": False, "message": result.get("message", "获取下载链接失败")})
+    except Exception as e:
+        logging.error(f"Error getting download URL: {str(e)}")
+        return jsonify({"success": False, "message": str(e)})
+
 # 添加任务接口
 @app.route("/api/add_task", methods=["POST"])
 def add_task():

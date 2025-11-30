@@ -4,11 +4,14 @@
         padding: 20px;
         height: calc(100vh - 70px);
         border-right: 1px solid #30363D;
+        display: flex;
+        flex-direction: column;
     }
     .library-content {
         padding: 20px;
         height: calc(100vh - 70px);
         background-color: #0D1117;
+        overflow-y: auto;
     }
     .file-explorer {
         background-color: #0D1117;
@@ -16,26 +19,168 @@
         border-radius: 6px;
         padding: 16px;
         color: #C9D1D9;
+        flex: 1;
+        overflow-y: auto;
+    }
+    .file-explorer .list-group {
+        margin-bottom: 0;
     }
     .file-explorer .list-group-item {
         background-color: transparent;
         border: none;
         color: #C9D1D9;
+        cursor: pointer;
+        padding: 8px 12px;
+        border-radius: 4px;
+        margin-bottom: 2px;
+        transition: background-color 0.2s;
+    }
+    .file-explorer .list-group-item:hover {
+        background-color: #21262D;
+    }
+    .file-explorer .list-group-item.active {
+        background-color: #0969DA;
     }
     .file-explorer .list-group-item i {
         color: #8B949E;
+        width: 16px;
+        text-align: center;
+    }
+    .file-explorer .list-group-item.video-item {
+        border-left: 3px solid transparent;
+    }
+    .file-explorer .list-group-item.video-item:hover {
+        border-left-color: #0d6efd;
     }
     .storage-usage {
-        margin-top: auto;
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid #30363D;
     }
     .progress-circle {
-        width: 100px;
-        height: 100px;
+        width: 80px;
+        height: 80px;
         border-radius: 50%;
-        background: conic-gradient(#0d6efd 75%, #30363D 0);
+        background: conic-gradient(#0d6efd var(--usage-percent), #30363D 0);
         display: flex;
         justify-content: center;
         align-items: center;
+        position: relative;
+    }
+    .progress-circle::before {
+        content: '';
+        position: absolute;
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        background-color: #161B22;
+    }
+    .progress-circle span {
+        position: relative;
+        font-size: 0.8rem;
+        font-weight: bold;
+    }
+    .breadcrumb {
+        background-color: transparent;
+        padding: 0;
+        margin-bottom: 16px;
+    }
+    .breadcrumb-item {
+        color: #8B949E;
+    }
+    .breadcrumb-item.active {
+        color: #C9D1D9;
+    }
+    .breadcrumb-item a {
+        color: #58A6FF;
+        text-decoration: none;
+    }
+    .breadcrumb-item a:hover {
+        text-decoration: underline;
+    }
+    .file-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 16px;
+    }
+    .file-card {
+        background-color: #161B22;
+        border: 1px solid #30363D;
+        border-radius: 8px;
+        padding: 16px;
+        cursor: pointer;
+        transition: all 0.2s;
+        height: 200px;
+        display: flex;
+        flex-direction: column;
+    }
+    .file-card:hover {
+        background-color: #21262D;
+        border-color: #58A6FF;
+    }
+    .file-card.video-card {
+        position: relative;
+    }
+    .file-card .file-icon {
+        font-size: 3rem;
+        color: #8B949E;
+        margin-bottom: 12px;
+        text-align: center;
+    }
+    .file-card .file-name {
+        color: #C9D1D9;
+        font-size: 0.9rem;
+        text-align: center;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .file-card .file-size {
+        color: #8B949E;
+        font-size: 0.8rem;
+        text-align: center;
+        margin-top: auto;
+    }
+    .file-card .play-overlay {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        border-radius: 50%;
+        width: 50px;
+        height: 50px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        transition: opacity 0.2s;
+    }
+    .file-card:hover .play-overlay {
+        opacity: 1;
+    }
+    .loading-spinner {
+        text-align: center;
+        padding: 20px;
+    }
+    .error-message {
+        color: #f85149;
+        text-align: center;
+        padding: 20px;
+    }
+    .video-player {
+        width: 100%;
+        height: 60vh;
+        background-color: #000;
+        border-radius: 8px;
+        margin-bottom: 16px;
+    }
+    .video-info {
+        background-color: #161B22;
+        border: 1px solid #30363D;
+        border-radius: 8px;
+        padding: 16px;
     }
 </style>
 <div class="container-fluid">
@@ -43,37 +188,426 @@
         <div class="col-md-3 library-sidebar">
             <div class="file-explorer">
                 <div class="d-flex justify-content-between align-items-center mb-3">
-                    <span><i class="bi bi-arrow-left"></i> root</span>
-                    <i class="bi bi-arrow-clockwise"></i>
+                    <div class="d-flex align-items-center">
+                        <button class="btn btn-sm btn-outline-secondary me-2" id="backBtn" disabled>
+                            <i class="bi bi-arrow-left"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" id="refreshBtn">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                        <button class="btn btn-sm btn-primary" id="initBtn" title="手动初始化（如果自动初始化失败）">
+                            <i class="bi bi-play-circle"></i>
+                        </button>
+                    </div>
+                    <span class="text-muted" id="currentPath">/</span>
                 </div>
-                <ul class="list-group">
-                    <li class="list-group-item"><i class="bi bi-folder me-2"></i> Movies</li>
-                    <li class="list-group-item"><i class="bi bi-folder me-2"></i> TV Shows</li>
-                    <li class="list-group-item"><i class="bi bi-folder me-2"></i> Downloads</li>
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span><i class="bi bi-file-earmark-text me-2"></i> readme.txt</span>
-                        <span class="badge bg-secondary">2KB</span>
-                    </li>
+                <ul class="list-group" id="fileList">
+                    <div class="loading-spinner">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
                 </ul>
             </div>
-            <div class="storage-usage mt-4">
-                <p>Storage Usage</p>
+            <div class="storage-usage">
+                <p class="mb-2">Storage Usage</p>
                 <div class="d-flex align-items-center">
-                    <div class="progress-circle me-3"></div>
+                    <div class="progress-circle me-3" style="--usage-percent: 0%">
+                        <span id="usagePercent">0%</span>
+                    </div>
                     <div>
-                        <strong>400GB</strong> / 1TB
+                        <strong id="usageText">Loading...</strong>
                     </div>
                 </div>
             </div>
         </div>
         <div class="col-md-9 library-content">
-            <div class="d-flex justify-content-center align-items-center h-100">
-                <div class="text-center">
-                    <i class="bi bi-play-circle" style="font-size: 5rem; color: #8B949E;"></i>
-                    <p class="text-muted">Select a video to start watching</p>
-                    <p class="text-muted">Connects to Openlist</p>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb" id="breadcrumb">
+                    <li class="breadcrumb-item active">Loading...</li>
+                </ol>
+            </nav>
+            <div id="contentArea">
+                <div class="d-flex justify-content-center align-items-center h-100">
+                    <div class="text-center">
+                        <i class="bi bi-collection-play" style="font-size: 5rem; color: #8B949E;"></i>
+                        <p class="text-muted">Browse files from your OpenList/Alist server</p>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 </div>
+
+<script>
+let currentPath = '/';
+let currentFiles = [];
+let currentStorage = null;
+
+// 页面显示时初始化
+document.addEventListener('showPage', function(event) {
+    if (event.detail.pageId === 'library') {
+        setTimeout(initLibrary, 100); // 延迟一点时间确保DOM完全加载
+    }
+});
+
+// 也检查页面是否已经可见
+if (document.getElementById('library') && document.getElementById('library').style.display !== 'none') {
+    setTimeout(initLibrary, 100);
+}
+
+// 添加 MutationObserver 来监听页面显示状态变化
+const observer = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+        if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+            const libraryPage = document.getElementById('library');
+            if (libraryPage && libraryPage.style.display !== 'none') {
+                setTimeout(initLibrary, 100);
+                observer.disconnect(); // 只执行一次
+            }
+        }
+    });
+});
+
+// 开始观察 library 页面的 style 属性变化
+const libraryPage = document.getElementById('library');
+if (libraryPage) {
+    observer.observe(libraryPage, { attributes: true });
+}
+
+// 添加一个简单的点击测试
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Library page loaded');
+    
+    // 为 library 标签添加点击监听器作为备用
+    const libraryNavLink = document.querySelector('[data-page="library"]');
+    if (libraryNavLink) {
+        console.log('Found library nav link, adding click listener');
+        libraryNavLink.addEventListener('click', function(e) {
+            console.log('Library nav link clicked');
+            setTimeout(initLibrary, 200);
+        });
+    }
+});
+
+function initLibrary() {
+    console.log('Initializing library...');
+    loadStorageInfo();
+    loadFileList(currentPath);
+    
+    // 事件监听
+    const backBtn = document.getElementById('backBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const initBtn = document.getElementById('initBtn');
+    
+    if (backBtn) {
+        backBtn.addEventListener('click', goBack);
+    }
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => loadFileList(currentPath, true));
+    }
+    if (initBtn) {
+        initBtn.addEventListener('click', () => {
+            console.log('Manual init button clicked');
+            loadStorageInfo();
+            loadFileList(currentPath);
+        });
+    }
+}
+
+function loadStorageInfo() {
+    axios.get('/api/library/storage_info')
+        .then(response => {
+            if (response.data.success) {
+                currentStorage = response.data.data.storage;
+                updateStorageUsage(currentStorage);
+            } else {
+                showError('Failed to load storage info: ' + response.data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error loading storage info:', error);
+            showError('Failed to load storage info');
+        });
+}
+
+function updateStorageUsage(storage) {
+    const used = parseInt(storage.used) || 0;
+    const total = parseInt(storage.total) || 1;
+    const percent = Math.round((used / total) * 100);
+    
+    document.documentElement.style.setProperty('--usage-percent', percent + '%');
+    document.getElementById('usagePercent').textContent = percent + '%';
+    document.getElementById('usageText').textContent = `${formatBytes(used)} / ${formatBytes(total)}`;
+}
+
+function loadFileList(path, refresh = false) {
+    currentPath = path;
+    
+    // 更新UI状态
+    document.getElementById('currentPath').textContent = path;
+    document.getElementById('backBtn').disabled = path === '/';
+    
+    // 显示加载状态
+    const fileList = document.getElementById('fileList');
+    fileList.innerHTML = `
+        <div class="loading-spinner">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    `;
+    
+    // 更新面包屑
+    updateBreadcrumb(path);
+    
+    axios.post('/api/library/fs/list', { path: path, refresh: refresh })
+        .then(response => {
+            if (response.data.success) {
+                currentFiles = response.data.data.content || [];
+                displayFileList(currentFiles);
+                displayFileGrid(currentFiles);
+            } else {
+                showError('Failed to load files: ' + response.data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error loading file list:', error);
+            showError('Failed to load files');
+        });
+}
+
+function displayFileList(files) {
+    const fileList = document.getElementById('fileList');
+    
+    if (files.length === 0) {
+        fileList.innerHTML = '<div class="text-center text-muted p-3">Empty directory</div>';
+        return;
+    }
+    
+    let html = '';
+    
+    // 添加上级目录链接（如果不是根目录）
+    if (currentPath !== '/') {
+        html += `
+            <li class="list-group-item" onclick="navigateToParent()">
+                <i class="bi bi-folder-fill me-2"></i> ..
+            </li>
+        `;
+    }
+    
+    // 排序：文件夹在前，然后是文件
+    const sortedFiles = files.sort((a, b) => {
+        if (a.is_dir && !b.is_dir) return -1;
+        if (!a.is_dir && b.is_dir) return 1;
+        return a.name.localeCompare(b.name);
+    });
+    
+    sortedFiles.forEach(file => {
+        const icon = file.is_dir ? 'bi-folder' : getFileIcon(file.name);
+        const size = file.is_dir ? '' : formatBytes(file.size);
+        
+        html += `
+            <li class="list-group-item ${!file.is_dir && isVideoFile(file.name) ? 'video-item' : ''}"
+                onclick="handleFileClick('${file.name}', ${file.is_dir})">
+                <i class="bi ${icon} me-2"></i>
+                <span class="flex-grow-1">${file.name}</span>
+                ${size ? `<span class="badge bg-secondary">${size}</span>` : ''}
+            </li>
+        `;
+    });
+    
+    fileList.innerHTML = html;
+}
+
+function displayFileGrid(files) {
+    const contentArea = document.getElementById('contentArea');
+    
+    if (files.length === 0) {
+        contentArea.innerHTML = `
+            <div class="d-flex justify-content-center align-items-center h-100">
+                <div class="text-center">
+                    <i class="bi bi-folder-x" style="font-size: 5rem; color: #8B949E;"></i>
+                    <p class="text-muted">Empty directory</p>
+                </div>
+            </div>
+        `;
+        return;
+    }
+    
+    // 只显示视频文件
+    const videoFiles = files.filter(file => !file.is_dir && isVideoFile(file.name));
+    
+    if (videoFiles.length === 0) {
+        contentArea.innerHTML = `
+            <div class="d-flex justify-content-center align-items-center h-100">
+                <div class="text-center">
+                    <i class="bi bi-film" style="font-size: 5rem; color: #8B949E;"></i>
+                    <p class="text-muted">No video files in this directory</p>
+                </div>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '<div class="file-grid">';
+    
+    videoFiles.forEach(file => {
+        html += `
+            <div class="file-card video-card" onclick="playVideo('${file.name}')">
+                <div class="file-icon">
+                    <i class="bi ${getFileIcon(file.name)}"></i>
+                </div>
+                <div class="play-overlay">
+                    <i class="bi bi-play-fill"></i>
+                </div>
+                <div class="file-name">${file.name}</div>
+                <div class="file-size">${formatBytes(file.size)}</div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    contentArea.innerHTML = html;
+}
+
+function handleFileClick(fileName, isDir) {
+    if (isDir) {
+        navigateToDirectory(fileName);
+    } else {
+        if (isVideoFile(fileName)) {
+            playVideo(fileName);
+        }
+    }
+}
+
+function navigateToDirectory(dirName) {
+    const newPath = currentPath === '/' ? `/${dirName}` : `${currentPath}/${dirName}`;
+    loadFileList(newPath);
+}
+
+function navigateToParent() {
+    const parentPath = currentPath.substring(0, currentPath.lastIndexOf('/'));
+    loadFileList(parentPath === '' ? '/' : parentPath);
+}
+
+function goBack() {
+    navigateToParent();
+}
+
+function updateBreadcrumb(path) {
+    const breadcrumb = document.getElementById('breadcrumb');
+    const parts = path.split('/').filter(part => part);
+    
+    let html = '<li class="breadcrumb-item"><a href="#" onclick="loadFileList(\'/\')">Home</a></li>';
+    
+    let currentPath = '';
+    parts.forEach((part, index) => {
+        currentPath += '/' + part;
+        if (index === parts.length - 1) {
+            html += `<li class="breadcrumb-item active">${part}</li>`;
+        } else {
+            html += `<li class="breadcrumb-item"><a href="#" onclick="loadFileList('${currentPath}')">${part}</a></li>`;
+        }
+    });
+    
+    breadcrumb.innerHTML = html;
+}
+
+function playVideo(fileName) {
+    const filePath = currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`;
+    console.log('Playing video:', fileName, 'at path:', filePath);
+    
+    // 使用 POST 方法获取视频链接
+    axios.post('/api/library/fs/download', { path: filePath })
+        .then(response => {
+            console.log('Download response:', response);
+            if (response.data.success) {
+                const downloadUrl = response.data.data.download_url;
+                showVideoPlayer(fileName, downloadUrl);
+            } else {
+                console.error('Failed to get video URL:', response.data);
+                showError('Failed to get video URL: ' + response.data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error getting video URL:', error);
+            showError('Failed to get video URL: ' + error.message);
+        });
+}
+
+function showVideoPlayer(fileName, videoUrl) {
+    const contentArea = document.getElementById('contentArea');
+    contentArea.innerHTML = `
+        <div>
+            <video class="video-player" controls autoplay>
+                <source src="${videoUrl}" type="video/mp4">
+                Your browser does not support the video tag.
+            </video>
+            <div class="video-info">
+                <h5>${fileName}</h5>
+                <p class="text-muted mb-0">Playing from: ${currentPath}</p>
+            </div>
+        </div>
+    `;
+}
+
+function getFileIcon(fileName) {
+    const ext = fileName.split('.').pop().toLowerCase();
+    const iconMap = {
+        'mp4': 'bi-film',
+        'mkv': 'bi-film',
+        'avi': 'bi-film',
+        'mov': 'bi-film',
+        'wmv': 'bi-film',
+        'flv': 'bi-film',
+        'webm': 'bi-film',
+        'm4v': 'bi-film',
+        'txt': 'bi-file-text',
+        'pdf': 'bi-file-pdf',
+        'doc': 'bi-file-word',
+        'docx': 'bi-file-word',
+        'xls': 'bi-file-excel',
+        'xlsx': 'bi-file-excel',
+        'ppt': 'bi-file-ppt',
+        'pptx': 'bi-file-ppt',
+        'jpg': 'bi-file-image',
+        'jpeg': 'bi-file-image',
+        'png': 'bi-file-image',
+        'gif': 'bi-file-image',
+        'zip': 'bi-file-zip',
+        'rar': 'bi-file-zip',
+        '7z': 'bi-file-zip'
+    };
+    return iconMap[ext] || 'bi-file-earmark';
+}
+
+function isVideoFile(fileName) {
+    const videoExts = ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v'];
+    const ext = fileName.split('.').pop().toLowerCase();
+    return videoExts.includes(ext);
+}
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function showError(message) {
+    console.error('Library error:', message);
+    const contentArea = document.getElementById('contentArea');
+    contentArea.innerHTML = `
+        <div class="error-message">
+            <i class="bi bi-exclamation-triangle" style="font-size: 3rem;"></i>
+            <p>${message}</p>
+            <p class="text-muted mt-2">请检查浏览器控制台获取更多信息</p>
+            <button class="btn btn-sm btn-outline-primary mt-2" onclick="loadStorageInfo(); loadFileList(currentPath);">
+                <i class="bi bi-arrow-clockwise"></i> 重试
+            </button>
+        </div>
+    `;
+}
+</script>
