@@ -402,8 +402,12 @@ def get_task_suggestions():
         if str(net_data.get("enable", "true")).lower() != "false":
             base_url = base64.b64decode("aHR0cHM6Ly9zLjkxNzc4OC54eXo=").decode()
             url = f"{base_url}/task_suggestions?q={query}&d={deep}"
-            response = requests.get(url)
-            return response.json()
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    return response.json()
+            except Exception as e:
+                logging.error(f"Net search error: {e}")
         return []
 
     def cs_search():
@@ -430,7 +434,9 @@ def get_task_suggestions():
     def ps_search():
         if ps_data.get("server"):
             ps = PanSou(ps_data.get("server"))
-            return ps.search(query, deep == "1")
+            channels = ps_data.get("channels")
+            plugins = ps_data.get("plugins")
+            return ps.search(query, deep == "1", channels=channels, plugins=plugins)
         return []
 
     try:
@@ -594,6 +600,35 @@ def delete_file():
     else:
         response = {"success": False, "message": "缺失必要字段: fid"}
     return jsonify(response)
+def _get_user_path(path):
+    """
+    根据用户角色调整路径。
+    如果是普通用户，路径将基于 save_path_default/{username}。
+    """
+    user_info = session.get('user', {})
+    if user_info.get('role') == 'user':
+        username = user_info.get('username')
+        if username:
+            if not path.startswith('/'):
+                path = '/' + path
+            
+            save_path_default = config_data.get("save_path_default", "/")
+            # 规范化 save_path_default
+            if not save_path_default.startswith('/'):
+                save_path_default = '/' + save_path_default
+            if save_path_default != "/" and save_path_default.endswith('/'):
+                save_path_default = save_path_default[:-1]
+                
+            if save_path_default == "/":
+                 path = f'/{username}{path}'
+            else:
+                 path = f'{save_path_default}/{username}{path}'
+            
+            # 清理多余的斜杠
+            path = re.sub(r'/{2,}', '/', path)
+            
+    return path
+
 @app.route("/api/transfer", methods=["POST"])
 def transfer_files():
     if not is_login():
@@ -607,14 +642,7 @@ def transfer_files():
     save_path = data.get("save_path", "/")
 
     # 根据用户角色调整保存路径
-    user_info = session.get('user', {})
-    if user_info.get('role') == 'user':
-        username = user_info.get('username')
-        if username:
-            # 确保路径以斜杠开头且不重复
-            if not save_path.startswith('/'):
-                save_path = '/' + save_path
-            save_path = f'/{username}{save_path}'
+    save_path = _get_user_path(save_path)
     
     if not fids or not stoken or not pwd_id:
         return jsonify({"success": False, "message": "Missing required parameters: fids, stoken, or pwd_id"})
@@ -731,13 +759,7 @@ def get_fs_list():
         path = data.get("path", "/")
         
         # 根据用户角色调整路径
-        user_info = session.get('user', {})
-        if user_info.get('role') == 'user':
-            username = user_info.get('username')
-            if username:
-                if not path.startswith('/'):
-                    path = '/' + path
-                path = f'/{username}{path}'
+        path = _get_user_path(path)
         refresh = data.get("refresh", False)
         
         alist_config = config_data.get("plugins", {}).get("alist", {})
@@ -778,13 +800,7 @@ def get_file_info():
         path = data.get("path", "")
         
         # 根据用户角色调整路径
-        user_info = session.get('user', {})
-        if user_info.get('role') == 'user':
-            username = user_info.get('username')
-            if username:
-                if not path.startswith('/'):
-                    path = '/' + path
-                path = f'/{username}{path}'
+        path = _get_user_path(path)
         password = data.get("password", "")
         
         alist_config = config_data.get("plugins", {}).get("alist", {})
@@ -823,6 +839,9 @@ def get_download_url():
             data = request.json
             path = data.get("path", "")
         
+        # 根据用户角色调整路径
+        path = _get_user_path(path)
+
         alist_config = config_data.get("plugins", {}).get("alist", {})
         if not alist_config.get("url") or not alist_config.get("token"):
             return jsonify({"success": False, "message": "Alist 未配置"})

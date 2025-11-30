@@ -376,7 +376,15 @@ function loadFileList(path, refresh = false) {
                 displayFileList(currentFiles);
                 displayFileGrid(currentFiles);
             } else {
-                showError('Failed to load files: ' + response.data.message);
+                // 特殊处理：如果后端返回 storage not found，视为新用户空目录，不报错
+                if (response.data.message && response.data.message.includes('storage not found')) {
+                    console.log('Storage not found, treating as empty directory (new user)');
+                    currentFiles = [];
+                    displayFileList(currentFiles);
+                    displayFileGrid(currentFiles);
+                } else {
+                    showError('Failed to load files: ' + response.data.message);
+                }
             }
         })
         .catch(error => {
