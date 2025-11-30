@@ -289,10 +289,12 @@ def get_public_config():
     if not is_login():
         return jsonify({"success": False, "message": "未登录"})
     user_info = session.get('user', {})
+    is_admin = user_info.get('role') == 'admin'
+    save_path_default = config_data.get("save_path_default", "/") if is_admin else ""
     data = {
         "version": app.config["APP_VERSION"],
-        "save_path_default": config_data.get("save_path_default", "/"),
-        "is_admin": user_info.get('role') == 'admin',
+        "save_path_default": save_path_default,
+        "is_admin": is_admin,
         "username": user_info.get('username')
     }
     return jsonify({"success": True, "data": data})

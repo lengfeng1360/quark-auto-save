@@ -164,7 +164,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if(response.data.success) {
                     const defaultPath = response.data.data.save_path_default;
                     const savePathInput = document.getElementById('savePathInput');
-                    if(defaultPath && savePathInput) {
+                    if(typeof defaultPath === 'string' && savePathInput) {
                         savePathInput.value = defaultPath;
                     }
                 }
