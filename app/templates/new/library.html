@@ -22,6 +22,20 @@
         flex: 1;
         overflow-y: auto;
     }
+    .file-explorer::-webkit-scrollbar {
+        width: 8px;
+    }
+    .file-explorer::-webkit-scrollbar-track {
+        background: #0D1117;
+    }
+    .file-explorer::-webkit-scrollbar-thumb {
+        background-color: #30363D;
+        border-radius: 4px;
+        border: 2px solid #0D1117;
+    }
+    .file-explorer::-webkit-scrollbar-thumb:hover {
+        background-color: #58A6FF;
+    }
     .file-explorer .list-group {
         margin-bottom: 0;
     }
@@ -182,6 +196,32 @@
         border-radius: 8px;
         padding: 16px;
     }
+    .video-container {
+        position: relative;
+    }
+    .close-video-btn {
+        position: absolute;
+        top: 15px;
+        right: 15px;
+        font-size: 2rem;
+        color: white;
+        background-color: rgba(0, 0, 0, 0.5);
+        border: none;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        line-height: 1;
+        padding: 0;
+        text-align: center;
+        cursor: pointer;
+        z-index: 10;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    .close-video-btn:hover {
+        background-color: rgba(0, 0, 0, 0.8);
+    }
 </style>
 <div class="container-fluid">
     <div class="row">
@@ -209,17 +249,6 @@
                     </div>
                 </ul>
             </div>
-            <div class="storage-usage">
-                <p class="mb-2">Storage Usage</p>
-                <div class="d-flex align-items-center">
-                    <div class="progress-circle me-3" style="--usage-percent: 0%">
-                        <span id="usagePercent">0%</span>
-                    </div>
-                    <div>
-                        <strong id="usageText">Loading...</strong>
-                    </div>
-                </div>
-            </div>
         </div>
         <div class="col-md-9 library-content">
             <nav aria-label="breadcrumb">
@@ -242,7 +271,8 @@
 <script>
 let currentPath = '/';
 let currentFiles = [];
-let currentStorage = null;
+let isVideoPlaying = false;
+let libraryInitialized = false;
 
 // 页面显示时初始化
 document.addEventListener('showPage', function(event) {
@@ -291,8 +321,12 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function initLibrary() {
+    if (libraryInitialized) {
+        return;
+    }
+    libraryInitialized = true;
     console.log('Initializing library...');
-    loadStorageInfo();
+    // loadStorageInfo();
     loadFileList(currentPath);
     
     // 事件监听
@@ -309,37 +343,11 @@ function initLibrary() {
     if (initBtn) {
         initBtn.addEventListener('click', () => {
             console.log('Manual init button clicked');
-            loadStorageInfo();
             loadFileList(currentPath);
         });
     }
 }
 
-function loadStorageInfo() {
-    axios.get('/api/library/storage_info')
-        .then(response => {
-            if (response.data.success) {
-                currentStorage = response.data.data.storage;
-                updateStorageUsage(currentStorage);
-            } else {
-                showError('Failed to load storage info: ' + response.data.message);
-            }
-        })
-        .catch(error => {
-            console.error('Error loading storage info:', error);
-            showError('Failed to load storage info');
-        });
-}
-
-function updateStorageUsage(storage) {
-    const used = parseInt(storage.used) || 0;
-    const total = parseInt(storage.total) || 1;
-    const percent = Math.round((used / total) * 100);
-    
-    document.documentElement.style.setProperty('--usage-percent', percent + '%');
-    document.getElementById('usagePercent').textContent = percent + '%';
-    document.getElementById('usageText').textContent = `${formatBytes(used)} / ${formatBytes(total)}`;
-}
 
 function loadFileList(path, refresh = false) {
     currentPath = path;
@@ -421,6 +429,9 @@ function displayFileList(files) {
 }
 
 function displayFileGrid(files) {
+    if (isVideoPlaying) {
+        return;
+    }
     const contentArea = document.getElementById('contentArea');
     
     if (files.length === 0) {
@@ -537,9 +548,11 @@ function playVideo(fileName) {
 }
 
 function showVideoPlayer(fileName, videoUrl) {
+    isVideoPlaying = true;
     const contentArea = document.getElementById('contentArea');
     contentArea.innerHTML = `
-        <div>
+        <div class="video-container">
+             <button class="close-video-btn" onclick="closeVideoPlayer()">&times;</button>
             <video class="video-player" controls autoplay>
                 <source src="${videoUrl}" type="video/mp4">
                 Your browser does not support the video tag.
@@ -550,6 +563,12 @@ function showVideoPlayer(fileName, videoUrl) {
             </div>
         </div>
     `;
+}
+
+function closeVideoPlayer() {
+    isVideoPlaying = false;
+    // 重新显示文件网格
+    displayFileGrid(currentFiles);
 }
 
 function getFileIcon(fileName) {
@@ -598,13 +617,19 @@ function formatBytes(bytes) {
 
 function showError(message) {
     console.error('Library error:', message);
+    const fileList = document.getElementById('fileList');
     const contentArea = document.getElementById('contentArea');
-    contentArea.innerHTML = `
-        <div class="error-message">
-            <i class="bi bi-exclamation-triangle" style="font-size: 3rem;"></i>
+
+    // Clear the main content grid
+    contentArea.innerHTML = '';
+
+    // Display error in the file list sidebar
+    fileList.innerHTML = `
+        <div class="error-message p-3 text-center">
+            <i class="bi bi-exclamation-triangle mb-2" style="font-size: 2rem;"></i>
             <p>${message}</p>
-            <p class="text-muted mt-2">请检查浏览器控制台获取更多信息</p>
-            <button class="btn btn-sm btn-outline-primary mt-2" onclick="loadStorageInfo(); loadFileList(currentPath);">
+            <p class="text-muted small">请检查浏览器控制台获取更多信息</p>
+            <button class="btn btn-sm btn-outline-primary mt-2" onclick="loadFileList(currentPath, true);">
                 <i class="bi bi-arrow-clockwise"></i> 重试
             </button>
         </div>
