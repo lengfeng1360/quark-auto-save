@@ -1,4 +1,17 @@
 {
+  "invite_codes": [
+    {
+      "code": "quark_share",
+      "type": "generic",
+      "note": "通用邀请码"
+    },
+    {
+      "code": "vip_one_time",
+      "type": "one_time",
+      "status": "unused",
+      "note": "一次性测试码"
+    }
+  ],
   "cookie": [
     "Your pan.quark.cn Cookie1, Only this one will do save task."
   ],

@@ -18,13 +18,15 @@ from apscheduler.triggers.cron import CronTrigger
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sdk.cloudsaver import CloudSaver
 from sdk.pansou import PanSou
-from datetime import timedelta
+from datetime import datetime, timedelta
+from werkzeug.security import generate_password_hash, check_password_hash
 import subprocess
 import requests
 import hashlib
 import logging
 import traceback
 import base64
+import secrets
 import sys
 import os
 import re
@@ -80,7 +82,7 @@ task_plugins_config_default = {}
 
 app = Flask(__name__)
 app.config["APP_VERSION"] = get_app_ver()
-app.secret_key = "ca943f6db6dd34823d36ab08d8d6f65d"
+app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(16))
 app.config["SESSION_COOKIE_NAME"] = "QUARK_AUTO_SAVE_SESSION"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=31)
 app.json.ensure_ascii = False
@@ -108,17 +110,18 @@ def gen_md5(string):
 
 
 def get_login_token():
-    username = config_data["webui"]["username"]
-    password = config_data["webui"]["password"]
-    return gen_md5(f"token{username}{password}+-*/")[8:24]
+    # 兼容旧API的token，基于第一个管理员用户生成
+    admin_user = next((user for user in config_data.get("users", []) if user.get("role") == "admin"), None)
+    if admin_user:
+        username = admin_user.get("username", "")
+        password = admin_user.get("password", "")
+        return gen_md5(f"token{username}{password}+-*/")[8:24]
+    return None
 
 
 def is_login():
-    login_token = get_login_token()
-    if session.get("token") == login_token or request.args.get("token") == login_token:
-        return True
-    else:
-        return False
+    # 检查session中是否有用户信息
+    return 'user' in session
 
 
 # 设置icon
@@ -135,29 +138,111 @@ def favicon():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = config_data["webui"]["username"]
-        password = config_data["webui"]["password"]
-        # 验证用户名和密码
-        if (username == request.form.get("username")) and (
-            password == request.form.get("password")
-        ):
-            logging.info(f">>> 用户 {username} 登录成功")
-            session.permanent = True
-            session["token"] = get_login_token()
-            return redirect(url_for("index"))
-        else:
-            logging.info(f">>> 用户 {username} 登录失败")
-            return render_template("login.html", message="登录失败")
+        form_username = request.form.get("username")
+        form_password = request.form.get("password")
+        
+        # 从配置中查找用户
+        for user in config_data.get("users", []):
+            password = user.get("password", "")
+            is_password_correct = False
+            # 检查密码是哈希值还是旧的明文
+            # 尝试直接验证哈希（check_password_hash 会自动识别方法）
+            try:
+                if check_password_hash(password, form_password):
+                    is_password_correct = True
+            except:
+                # 如果 check_password_hash 抛出异常（例如因为密码是明文而不是哈希），则忽略
+                pass
+
+            if not is_password_correct and password == form_password:
+                # 如果是旧的明文密码，且匹配
+                is_password_correct = True
+                # 【关键步骤】为用户自动升级密码为哈希值
+                user["password"] = generate_password_hash(form_password)
+                # 将更新后的用户信息写回配置文件
+                Config.write_json(CONFIG_PATH, config_data)
+                logging.info(f">>> 用户 {form_username} 的密码已自动升级为哈希存储")
+
+            if is_password_correct:
+                logging.info(f">>> 用户 {form_username} 登录成功")
+                session.permanent = True
+                # 存储用户信息到session
+                session['user'] = {
+                    'username': user.get("username"),
+                    'role': user.get("role", "user") # 默认为普通用户
+                }
+                return redirect(url_for("index"))
+
+        logging.info(f">>> 用户 {form_username} 登录失败")
+        return render_template("login.html", message="登录失败")
 
     if is_login():
         return redirect(url_for("index"))
     return render_template("login.html", error=None)
 
 
+# 注册页面
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        confirm_password = request.form.get("confirm_password")
+        invite_code = request.form.get("invite_code")
+
+        if not all([username, password, confirm_password, invite_code]):
+             return render_template("register.html", error="请填写所有字段")
+
+        if password != confirm_password:
+            return render_template("register.html", error="两次密码输入不一致")
+
+        # 检查用户名是否已存在
+        for user in config_data.get("users", []):
+            if user.get("username") == username:
+                return render_template("register.html", error="用户名已存在")
+
+        # 验证邀请码
+        invite_codes = config_data.get("invite_codes", [])
+        valid_code = None
+        for code_entry in invite_codes:
+            if code_entry.get("code") == invite_code:
+                if code_entry.get("type") == "one_time" and code_entry.get("status") == "used":
+                    continue # 已失效的一次性码
+                valid_code = code_entry
+                break
+        
+        if not valid_code:
+            return render_template("register.html", error="无效或已过期的邀请码")
+
+        # 创建用户
+        new_user = {
+            "username": username,
+            "password": generate_password_hash(password),
+            "role": "user" # 注册用户默认为普通用户
+        }
+        config_data["users"].append(new_user)
+
+        # 如果是一次性邀请码，更新状态
+        if valid_code.get("type") == "one_time":
+            valid_code["status"] = "used"
+            # 记录使用者信息，方便追踪（可选）
+            valid_code["used_by"] = username
+            valid_code["used_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        Config.write_json(CONFIG_PATH, config_data)
+        logging.info(f">>> 用户 {username} 使用邀请码 {invite_code} 注册成功")
+        
+        return render_template("login.html", message="注册成功，请登录")
+
+    if is_login():
+        return redirect(url_for("index"))
+    return render_template("register.html", error=None)
+
+
 # 退出登录
 @app.route("/logout")
 def logout():
-    session.pop("token", None)
+    session.pop("user", None)
     return redirect(url_for("login"))
 
 
@@ -166,6 +251,9 @@ def logout():
 def old_index():
     if not is_login():
         return redirect(url_for("login"))
+    # 检查是否为管理员
+    if session.get('user', {}).get('role') != 'admin':
+        return redirect(url_for("index")) # 非管理员跳转回主页
     return render_template(
         "index.html", version=app.config["APP_VERSION"], plugin_flags=PLUGIN_FLAGS
     )
@@ -176,7 +264,10 @@ def old_index():
 def index(path=""):
     if not is_login():
         return redirect(url_for("login"))
-    return render_template("new/index.html")
+    user_info = session.get('user', {})
+    is_admin = user_info.get('role') == 'admin'
+    username = user_info.get('username', '')
+    return render_template("new/index.html", is_admin=is_admin, username=username)
 
 
 # 获取配置数据 (仅限管理员使用，不要在非管理页面调用)
@@ -184,8 +275,12 @@ def index(path=""):
 def get_admin_data():
     if not is_login():
         return jsonify({"success": False, "message": "未登录"})
+    # 检查是否为管理员
+    if session.get('user', {}).get('role') != 'admin':
+        return jsonify({"success": False, "message": "无权访问"}), 403
     data = Config.read_json(CONFIG_PATH)
-    del data["webui"]
+    if "users" in data:
+        del data["users"] # 不返回用户信息
     data["api_token"] = get_login_token()
     data["task_plugins_config_default"] = task_plugins_config_default
     return jsonify({"success": True, "data": data})
@@ -193,9 +288,12 @@ def get_admin_data():
 def get_public_config():
     if not is_login():
         return jsonify({"success": False, "message": "未登录"})
+    user_info = session.get('user', {})
     data = {
         "version": app.config["APP_VERSION"],
-        "save_path_default": config_data.get("save_path_default", "/")
+        "save_path_default": config_data.get("save_path_default", "/"),
+        "is_admin": user_info.get('role') == 'admin',
+        "username": user_info.get('username')
     }
     return jsonify({"success": True, "data": data})
 
@@ -507,6 +605,16 @@ def transfer_files():
     stoken = data.get("stoken", "")
     pwd_id = data.get("pwd_id", "")
     save_path = data.get("save_path", "/")
+
+    # 根据用户角色调整保存路径
+    user_info = session.get('user', {})
+    if user_info.get('role') == 'user':
+        username = user_info.get('username')
+        if username:
+            # 确保路径以斜杠开头且不重复
+            if not save_path.startswith('/'):
+                save_path = '/' + save_path
+            save_path = f'/{username}{save_path}'
     
     if not fids or not stoken or not pwd_id:
         return jsonify({"success": False, "message": "Missing required parameters: fids, stoken, or pwd_id"})
@@ -621,6 +729,15 @@ def get_fs_list():
     try:
         data = request.json
         path = data.get("path", "/")
+        
+        # 根据用户角色调整路径
+        user_info = session.get('user', {})
+        if user_info.get('role') == 'user':
+            username = user_info.get('username')
+            if username:
+                if not path.startswith('/'):
+                    path = '/' + path
+                path = f'/{username}{path}'
         refresh = data.get("refresh", False)
         
         alist_config = config_data.get("plugins", {}).get("alist", {})
@@ -659,6 +776,15 @@ def get_file_info():
     try:
         data = request.json
         path = data.get("path", "")
+        
+        # 根据用户角色调整路径
+        user_info = session.get('user', {})
+        if user_info.get('role') == 'user':
+            username = user_info.get('username')
+            if username:
+                if not path.startswith('/'):
+                    path = '/' + path
+                path = f'/{username}{path}'
         password = data.get("password", "")
         
         alist_config = config_data.get("plugins", {}).get("alist", {})
@@ -860,13 +986,34 @@ def init():
     if not config_data.get("magic_regex"):
         config_data["magic_regex"] = MagicRename().magic_regex
 
-    # 默认管理账号
-    config_data["webui"] = {
-        "username": os.environ.get("WEBUI_USERNAME")
-        or config_data.get("webui", {}).get("username", "admin"),
-        "password": os.environ.get("WEBUI_PASSWORD")
-        or config_data.get("webui", {}).get("password", "admin123"),
-    }
+    # 用户配置初始化和迁移
+    if "users" not in config_data or not config_data["users"]:
+        # 从旧的 webui 配置迁移
+        if "webui" in config_data and config_data["webui"].get("username"):
+            config_data["users"] = [{
+                "username": config_data["webui"]["username"],
+                "password": config_data["webui"]["password"],
+                "role": "admin"
+            }]
+            del config_data["webui"] # 删除旧配置
+            logging.info(">>> 已将旧的 webui 配置迁移到新的 users 列表")
+        else:
+            # 创建一个默认管理员账户
+            config_data["users"] = [{
+                "username": os.environ.get("WEBUI_USERNAME", "admin"),
+                "password": generate_password_hash(os.environ.get("WEBUI_PASSWORD", "admin123")),
+                "role": "admin"
+            }]
+            logging.info(">>> 已创建默认管理员账户")
+
+    # 初始化邀请码配置
+    if "invite_codes" not in config_data:
+        config_data["invite_codes"] = [
+            # 示例：通用邀请码
+            # {"code": "quark_share", "type": "generic", "note": "公开邀请码"},
+            # 示例：一次性邀请码
+            # {"code": "vip_only_001", "type": "one_time", "status": "unused", "note": "VIP专属"}
+        ]
 
     # 默认定时规则
     if not config_data.get("crontab"):

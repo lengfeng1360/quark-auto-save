@@ -42,8 +42,15 @@
         <li class="nav-item"><a href="javascript:void(0);" data-page="search" class="nav-link active" aria-current="page"><i class="bi bi-search"></i> Search</a></li>
         <li class="nav-item"><a href="javascript:void(0);" data-page="transfer" class="nav-link"><i class="bi bi-arrow-down-up"></i> Transfer</a></li>
         <li class="nav-item"><a href="javascript:void(0);" data-page="library" class="nav-link"><i class="bi bi-collection-play"></i> Library</a></li>
+        {% if is_admin %}
         <li class="nav-item"><a href="/old_index" class="nav-link"><i class="bi bi-gear"></i> Config</a></li>
+        {% endif %}
     </ul>
+    <div class="d-flex align-items-center ms-3 ps-3 border-start border-secondary">
+        <a href="/logout" class="btn btn-outline-secondary btn-sm text-decoration-none" title="Logout">
+            <i class="bi bi-box-arrow-right"></i>
+        </a>
+    </div>
 </div>
 
 {% block content %}{% endblock %}
