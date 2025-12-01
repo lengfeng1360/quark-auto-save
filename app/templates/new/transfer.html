@@ -73,6 +73,10 @@
     .custom-scrollbar::-webkit-scrollbar-thumb:hover {
         background: #6c757d;
     }
+    /* 防止按钮文字换行 */
+    #transferButton {
+        white-space: nowrap;
+    }
 </style>
 
 <div class="container mt-4">
@@ -81,11 +85,11 @@
         <div class="col-lg-8 mx-auto">
             <div class="card bg-dark text-white border-secondary shadow-sm">
                 <div class="card-body p-4">
-                    <h5 class="card-title mb-3"><i class="bi bi-link-45deg"></i> Parse Share Link</h5>
+                    <h5 class="card-title mb-3"><i class="bi bi-link-45deg"></i> 解析分享链接</h5>
                     <div class="mb-3">
-                        <textarea class="form-control bg-secondary text-white border-0" id="shareLink" rows="2" placeholder="Paste share link here (e.g. https://pan.quark.cn/s/xxx code: 1234)"></textarea>
+                        <textarea class="form-control bg-secondary text-white border-0" id="shareLink" rows="2" placeholder="在此粘贴分享链接（例如 https://pan.quark.cn/s/xxx 提取码: 1234）"></textarea>
                     </div>
-                    <button id="analyzeButton" class="btn btn-primary w-100" type="button"><i class="bi bi-arrow-down-up"></i> Analyze & Fetch</button>
+                    <button id="analyzeButton" class="btn btn-primary w-100" type="button"><i class="bi bi-arrow-down-up"></i> 解析并获取</button>
                 </div>
             </div>
         </div>
@@ -94,7 +98,7 @@
     <!-- Loading Spinner -->
     <div id="loadingSpinner" class="text-center mt-4" style="display: none;">
         <div class="spinner-border" role="status">
-            <span class="visually-hidden">Loading...</span>
+            <span class="visually-hidden">加载中...</span>
         </div>
     </div>
 
@@ -110,7 +114,7 @@
         <div class="col-lg-8 mx-auto">
             <div class="card bg-dark text-white border-secondary shadow-sm">
                 <div class="card-header border-secondary d-flex justify-content-between align-items-center bg-dark">
-                    <h5 class="mb-0 mx-auto"><i class="bi bi-folder2-open"></i> File List</h5>
+                    <h5 class="mb-0 mx-auto"><i class="bi bi-folder2-open"></i> 文件列表</h5>
                 </div>
                 <div class="card-body p-0">
                     <div id="transferResultsContainer" class="text-start custom-scrollbar" style="max-height: 500px; overflow-y: auto;">
@@ -118,11 +122,11 @@
                 </div>
                 <div class="card-footer border-secondary bg-dark">
                     <div class="input-group mb-2">
-                         <span class="input-group-text bg-secondary text-white border-secondary">Save To</span>
-                         <input type="text" class="form-control bg-dark text-white border-secondary" id="savePathInput" placeholder="/ (Root Directory) or /MyFolder" value="/">
+                         <span class="input-group-text bg-secondary text-white border-secondary">保存到</span>
+                         <input type="text" class="form-control bg-dark text-white border-secondary" id="savePathInput" placeholder="/ (根目录) 或 /我的文件夹" value="/">
                     </div>
                     <div id="transferActions" class="d-flex justify-content-end">
-                        <button id="transferButton" class="btn btn-success" type="button"><i class="bi bi-cloud-download"></i> Transfer Selected</button>
+                        <button id="transferButton" class="btn btn-success" type="button"><i class="bi bi-cloud-download"></i> 转存</button>
                     </div>
                 </div>
             </div>
@@ -169,7 +173,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
             })
-            .catch(error => console.error("Failed to load config:", error));
+            .catch(error => console.error("加载配置失败:", error));
     };
     loadDefaultSavePath();
 
@@ -186,7 +190,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const analyzeAndFetch = () => {
         const shareUrl = shareLinkTextarea.value.trim();
         if (!shareUrl) {
-            errorMessage.textContent = 'Please paste a share link.';
+            errorMessage.textContent = '请粘贴分享链接。';
             document.getElementById('errorMessageContainer').style.display = 'block';
             return;
         }
@@ -219,15 +223,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     transferActions.style.display = 'none';
                     // Try to get error message from different possible fields
-                    const errorMsg = response.data.data?.error || response.data.message || 'Failed to analyze the link.';
+                    const errorMsg = response.data.data?.error || response.data.message || '无法解析链接。';
                     errorMessage.textContent = errorMsg;
                     document.getElementById('errorMessageContainer').style.display = 'block';
                 }
             })
             .catch(error => {
                 loadingSpinner.style.display = 'none';
-                console.error('Error fetching details:', error);
-                let msg = 'An error occurred while fetching details.';
+                console.error('获取详情时出错:', error);
+                let msg = '获取详情时发生错误。';
                 if (error.response && error.response.data && error.response.data.message) {
                     msg += ' ' + error.response.data.message;
                 } else if (error.message) {
@@ -264,13 +268,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderResults(response.data.data, container, false);
             } else {
                 // Show error inside the folder's container
-                container.innerHTML = `<li class="list-group-item bg-dark text-danger">Error: ${response.data.data.error}</li>`;
+                container.innerHTML = `<li class="list-group-item bg-dark text-danger">错误: ${response.data.data.error}</li>`;
             }
         })
         .catch(error => {
             loadingSpinner.style.display = 'none';
-            console.error('Error fetching directory details:', error);
-            container.innerHTML = `<li class="list-group-item bg-dark text-danger">An error occurred.</li>`;
+            console.error('获取目录详情时出错:', error);
+            container.innerHTML = `<li class="list-group-item bg-dark text-danger">发生错误。</li>`;
         });
     };
 
@@ -284,14 +288,14 @@ document.addEventListener('DOMContentLoaded', function() {
              const singleFile = {
                  ...data.share,
                  ...data.first_file,
-                 file_name: data.share.file_name || 'Unnamed File',
+                 file_name: data.share.file_name || '未命名文件',
                  dir: true // It's a directory
              };
              fileList = [singleFile];
         } else if (isRoot && (!fileList || fileList.length === 0) && data.share && data.share.file_name) {
             const singleFile = {
                 ...data.share,
-                file_name: data.share.file_name || 'Unnamed File',
+                file_name: data.share.file_name || '未命名文件',
                 dir: false,
             };
             fileList = [singleFile];
@@ -299,7 +303,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!fileList || fileList.length === 0) {
             const emptyMessage = document.createElement('li');
             emptyMessage.className = 'list-group-item bg-dark text-white';
-            emptyMessage.textContent = 'This folder is empty.';
+            emptyMessage.textContent = '此文件夹为空。';
             container.appendChild(emptyMessage);
             return;
         }
@@ -518,7 +522,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (itemsToTransfer.length === 0) {
             // 这种情况通常发生在用户只选中了子项，但其父项也隐含被选中时。
             // 或者用户根本没有选中任何东西。
-            alert('Please select at least one file or folder to transfer.');
+            alert('请至少选择一个文件或文件夹进行下载。');
             return;
         }
 
@@ -544,7 +548,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // 可选：传输成功后取消所有选择
                 resultsContainer.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => cb.checked = false);
             } else {
-                alert('Transfer Failed: ' + response.data.message);
+                alert('下载失败: ' + response.data.message);
                 if(response.data.errors) {
                     console.error(response.data.errors);
                 }
@@ -553,8 +557,8 @@ document.addEventListener('DOMContentLoaded', function() {
         .catch(error => {
              loadingSpinner.style.display = 'none';
              transferButton.disabled = false;
-             console.error('Error during transfer:', error);
-             alert('An unexpected error occurred.');
+             console.error('下载时出错:', error);
+             alert('发生意外错误。');
         });
     };
 

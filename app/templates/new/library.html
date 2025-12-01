@@ -245,12 +245,12 @@
                 </div>
                  <div class="d-flex align-items-center mb-2">
                     <input type="checkbox" class="form-check-input me-2" id="selectAllCheckbox">
-                    <label for="selectAllCheckbox" class="form-check-label">全选</label>
+                    <label for="selectAllCheckbox" class="form-check-label">Select All</label>
                 </div>
                 <ul class="list-group" id="fileList">
                     <div class="loading-spinner">
                         <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
+                            <span class="visually-hidden">加载中...</span>
                         </div>
                     </div>
                 </ul>
@@ -259,14 +259,14 @@
         <div class="col-md-9 library-content">
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb" id="breadcrumb">
-                    <li class="breadcrumb-item active">Loading...</li>
+                    <li class="breadcrumb-item active">加载中...</li>
                 </ol>
             </nav>
             <div id="contentArea">
                 <div class="d-flex justify-content-center align-items-center h-100">
                     <div class="text-center">
                         <i class="bi bi-collection-play" style="font-size: 5rem; color: #8B949E;"></i>
-                        <p class="text-muted">Browse files from your OpenList/Alist server</p>
+                        <p class="text-muted">从您的 OpenList/Alist 服务器浏览文件</p>
                     </div>
                 </div>
             </div>
@@ -374,7 +374,7 @@ function loadFileList(path, refresh = false) {
     fileList.innerHTML = `
         <div class="loading-spinner">
             <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
+                <span class="visually-hidden">加载中...</span>
             </div>
         </div>
     `;
@@ -396,13 +396,13 @@ function loadFileList(path, refresh = false) {
                     displayFileList(currentFiles);
                     displayFileGrid(currentFiles);
                 } else {
-                    showError('Failed to load files: ' + response.data.message);
+                    showError('加载文件失败: ' + response.data.message);
                 }
             }
         })
         .catch(error => {
             console.error('Error loading file list:', error);
-            showError('Failed to load files');
+            showError('加载文件失败');
         });
 }
 
@@ -410,7 +410,7 @@ function displayFileList(files) {
     const fileList = document.getElementById('fileList');
     
     if (files.length === 0) {
-        fileList.innerHTML = '<div class="text-center text-muted p-3">Empty directory</div>';
+        fileList.innerHTML = '<div class="text-center text-muted p-3">空目录</div>';
         return;
     }
     
@@ -453,7 +453,7 @@ function displayFileGrid(files) {
             <div class="d-flex justify-content-center align-items-center h-100">
                 <div class="text-center">
                     <i class="bi bi-folder-x" style="font-size: 5rem; color: #8B949E;"></i>
-                    <p class="text-muted">Empty directory</p>
+                    <p class="text-muted">空目录</p>
                 </div>
             </div>
         `;
@@ -468,7 +468,7 @@ function displayFileGrid(files) {
             <div class="d-flex justify-content-center align-items-center h-100">
                 <div class="text-center">
                     <i class="bi bi-film" style="font-size: 5rem; color: #8B949E;"></i>
-                    <p class="text-muted">No video files in this directory</p>
+                    <p class="text-muted">此目录中没有视频文件</p>
                 </div>
             </div>
         `;
@@ -533,7 +533,7 @@ function updateBreadcrumb(path) {
     const breadcrumb = document.getElementById('breadcrumb');
     const parts = path.split('/').filter(part => part);
     
-    let html = '<li class="breadcrumb-item"><a href="#" onclick="loadFileList(\'/\')">Home</a></li>';
+    let html = '<li class="breadcrumb-item"><a href="#" onclick="loadFileList(\'/\')">主页</a></li>';
     
     let currentPath = '';
     parts.forEach((part, index) => {
@@ -561,12 +561,12 @@ function playVideo(fileName) {
                 showVideoPlayer(fileName, downloadUrl);
             } else {
                 console.error('Failed to get video URL:', response.data);
-                showError('Failed to get video URL: ' + response.data.message);
+                showError('获取视频 URL 失败: ' + response.data.message);
             }
         })
         .catch(error => {
             console.error('Error getting video URL:', error);
-            showError('Failed to get video URL: ' + error.message);
+            showError('获取视频 URL 失败: ' + error.message);
         });
 }
 
@@ -578,11 +578,11 @@ function showVideoPlayer(fileName, videoUrl) {
              <button class="close-video-btn" onclick="closeVideoPlayer()">&times;</button>
             <video class="video-player" controls autoplay>
                 <source src="${videoUrl}" type="video/mp4">
-                Your browser does not support the video tag.
+                您的浏览器不支持 video 标签。
             </video>
             <div class="video-info">
                 <h5>${fileName}</h5>
-                <p class="text-muted mb-0">Playing from: ${currentPath}</p>
+                <p class="text-muted mb-0">播放路径: ${currentPath}</p>
             </div>
         </div>
     `;
@@ -631,9 +631,9 @@ function isVideoFile(fileName) {
 }
 
 function formatBytes(bytes) {
-    if (bytes === 0) return '0 Bytes';
+    if (bytes === 0) return '0 字节';
     const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const sizes = ['字节', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
@@ -651,9 +651,9 @@ function showError(message) {
         <div class="error-message p-3 text-center">
             <i class="bi bi-exclamation-triangle mb-2" style="font-size: 2rem;"></i>
             <p>${message}</p>
-            <p class="text-muted small">请检查浏览器控制台获取更多信息</p>
+            <p class="text-muted small">Please check the browser console for more information</p>
             <button class="btn btn-sm btn-outline-primary mt-2" onclick="loadFileList(currentPath, true);">
-                <i class="bi bi-arrow-clockwise"></i> 重试
+                <i class="bi bi-arrow-clockwise"></i> Retry
             </button>
         </div>
     `;
@@ -690,7 +690,7 @@ function deleteSelectedFiles() {
         return;
     }
 
-    if (!confirm(`确定要删除 ${filesToDelete.length} 个选中的项目吗？此操作无法撤销。`)) {
+    if (!confirm(`Are you sure you want to delete ${filesToDelete.length} selected items? This action cannot be undone.`)) {
         return;
     }
 
@@ -704,12 +704,12 @@ function deleteSelectedFiles() {
                 console.log('Files deleted successfully');
                 loadFileList(currentPath, true); // 强制刷新
             } else {
-                showError('删除失败: ' + response.data.message);
+                showError('Failed to delete: ' + response.data.message);
             }
         })
         .catch(error => {
             console.error('Error deleting files:', error);
-            showError('删除时出错');
+            showError('Error while deleting');
         });
 }
 </script>

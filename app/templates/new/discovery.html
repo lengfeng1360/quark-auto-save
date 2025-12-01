@@ -12,56 +12,124 @@
         border: 2px solid #161B22;
     }
 
+    /* 确保整个页面容器占满视口高度 */
+    html, body {
+        height: 100%;
+    }
+    
+    /* 主容器使用 flex 布局 */
+    .container-fluid {
+        height: calc(100vh - 56px); /* 减去导航栏高度，假设为56px */
+        display: flex;
+        flex-direction: column;
+        padding-top: 1rem; /* 顶部留白 */
+    }
+    
+    /* 搜索区域固定高度 */
+    .row.justify-content-center {
+        flex-shrink: 0; /* 防止被压缩 */
+        margin-bottom: 1rem;
+    }
+    
+    /* 结果区域占据剩余空间 */
+    #resultsContainer {
+        flex-grow: 1;
+        overflow-y: auto;
+        padding: 0 1rem 1rem;
+    }
+    
     .results-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-        gap: 1rem;
-        max-height: 75vh;
-        overflow-y: auto;
-        padding: 0 1rem;
+        gap: 1.5rem;
+        /* 移除 max-height，因为父容器已经限制了高度 */
     }
+    
     .card {
         background-color: #161B22;
         border: 1px solid #30363D;
         color: #C9D1D9;
-        height: 100%;
+        height: 320px;
         display: flex;
         flex-direction: column;
         justify-content: space-between;
+        transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        border-radius: 8px;
+    }
+    .card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.2);
     }
     .card-body {
         flex-grow: 1;
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    .card-title {
+        margin-bottom: 1rem;
+        flex-shrink: 0;
     }
     .card-title a {
         color: #58A6FF;
         text-decoration: none;
+        font-size: 1.2rem;
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .card-title a:hover {
         text-decoration: underline;
     }
-    .card-footer {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
     .card-text.small {
+        flex-grow: 1;
+        margin-bottom: 1rem;
+        line-height: 1.6;
         display: -webkit-box;
-        -webkit-line-clamp: 3; /* Limit to 3 lines */
+        -webkit-line-clamp: 3;
         -webkit-box-orient: vertical;
         overflow: hidden;
         text-overflow: ellipsis;
-        height: 60px; /* Assuming 3 lines with 1.25rem line-height and 0.875em font-size */
+        min-height: 4.8em;
     }
     #discoveryHeader {
         transition: all 0.5s ease-in-out;
         overflow: hidden;
         max-height: 200px;
+        margin-bottom: 2rem;
     }
     #discoveryHeader.collapsed {
         max-height: 0;
         opacity: 0;
         margin: 0;
         padding: 0;
+    }
+    .card-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 1.5rem;
+        background-color: rgba(48, 54, 61, 0.3);
+        flex-shrink: 0;
+    }
+    .badge {
+        font-size: 0.75rem;
+        padding: 0.3em 0.6em;
+    }
+    .btn-outline-light {
+        transition: all 0.2s ease-in-out;
+    }
+    .btn-outline-light:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+        transform: scale(1.1);
+    }
+    
+    /* 加载和错误消息样式 */
+    #loadingSpinner, #errorMessage {
+        flex-shrink: 0;
+        margin: 1rem 0;
     }
 </style>
 <div class="container-fluid mt-4">
