@@ -168,9 +168,15 @@ def login():
         form_username = request.form.get("username")
         form_password = request.form.get("password")
         
-        # 从配置中查找用户
+        # 从配置中查找匹配的用户
+        user_to_check = None
         for user in config_data.get("users", []):
-            password = user.get("password", "")
+            if user.get("username") == form_username:
+                user_to_check = user
+                break
+        
+        if user_to_check:
+            password = user_to_check.get("password", "")
             is_password_correct = False
             # 检查密码是哈希值还是旧的明文
             # 尝试直接验证哈希（check_password_hash 会自动识别方法）
@@ -185,7 +191,7 @@ def login():
                 # 如果是旧的明文密码，且匹配
                 is_password_correct = True
                 # 【关键步骤】为用户自动升级密码为哈希值
-                user["password"] = generate_password_hash(form_password)
+                user_to_check["password"] = generate_password_hash(form_password)
                 # 将更新后的用户信息写回配置文件
                 Config.write_json(CONFIG_PATH, config_data)
                 logging.info(f">>> 用户 {form_username} 的密码已自动升级为哈希存储")
@@ -195,8 +201,8 @@ def login():
                 session.permanent = True
                 # 存储用户信息到session
                 session['user'] = {
-                    'username': user.get("username"),
-                    'role': user.get("role", "user") # 默认为普通用户
+                    'username': user_to_check.get("username"),
+                    'role': user_to_check.get("role", "user") # 默认为普通用户
                 }
                 return redirect(url_for("index"))
 
