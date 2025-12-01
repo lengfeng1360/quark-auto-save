@@ -44,22 +44,44 @@
         justify-content: space-between;
         align-items: center;
     }
+    .card-text.small {
+        display: -webkit-box;
+        -webkit-line-clamp: 3; /* Limit to 3 lines */
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        height: 60px; /* Assuming 3 lines with 1.25rem line-height and 0.875em font-size */
+    }
+    #discoveryHeader {
+        transition: all 0.5s ease-in-out;
+        overflow: hidden;
+        max-height: 200px;
+    }
+    #discoveryHeader.collapsed {
+        max-height: 0;
+        opacity: 0;
+        margin: 0;
+        padding: 0;
+    }
 </style>
 <div class="container-fluid mt-4">
     <div class="row justify-content-center">
         <div class="col-md-8 text-center">
-            <h1 class="display-4">Resource Discovery</h1>
-            <p class="lead">Search for resources across multiple providers.</p>
+            <div id="discoveryHeader">
+                <h1 class="display-4">资源发现</h1>
+                <p class="lead">在多个资源提供商中搜索资源。</p>
+                <p class="small text-secondary">搜索到资源后，点击 <i class="bi bi-send-plus"></i> 按钮即可发送到下载页面进行转存。</p>
+            </div>
             <div class="input-group mb-3">
-                <input type="text" id="searchInput" class="form-control" placeholder="Search movies, shows, software...">
-                <button class="btn btn-primary" type="button" id="searchButton"><i class="bi bi-search"></i> Search</button>
+                <input type="text" id="searchInput" class="form-control" placeholder="搜索电影、剧集、软件...">
+                <button class="btn btn-primary" type="button" id="searchButton"><i class="bi bi-search"></i> 搜索</button>
             </div>
         </div>
     </div>
 
     <div id="loadingSpinner" class="text-center mt-4" style="display: none;">
         <div class="spinner-border" role="status">
-            <span class="visually-hidden">Loading...</span>
+            <span class="visually-hidden">加载中...</span>
         </div>
     </div>
 
@@ -82,7 +104,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const performSearch = () => {
         const query = searchInput.value.trim();
         if (query === '') {
-            errorMessage.textContent = 'Please enter a search term.';
+            errorMessage.textContent = '请输入搜索词。';
             errorMessage.style.display = 'block';
             return;
         }
@@ -102,19 +124,23 @@ document.addEventListener('DOMContentLoaded', function () {
             if (response.data.success && response.data.data.length > 0) {
                 renderResults(response.data.data);
             } else {
-                errorMessage.textContent = 'No results found.';
+                errorMessage.textContent = '未找到结果。';
                 errorMessage.style.display = 'block';
             }
         })
         .catch(error => {
             loadingSpinner.style.display = 'none';
             console.error('Error fetching search results:', error);
-            errorMessage.textContent = 'An error occurred while fetching results.';
+            errorMessage.textContent = '获取结果时发生错误。';
             errorMessage.style.display = 'block';
         });
     };
 
     const renderResults = (results) => {
+        const discoveryHeader = document.getElementById('discoveryHeader');
+        if (discoveryHeader) {
+            discoveryHeader.classList.add('collapsed');
+        }
         resultsContainer.innerHTML = ''; // Clear previous results
         results.forEach(item => {
             const card = document.createElement('div');
@@ -133,7 +159,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
             const description = document.createElement('p');
             description.className = 'card-text small';
-            description.textContent = item.content || 'No description available.';
+            const fullDescription = item.content || '暂无描述。';
+            description.textContent = fullDescription;
+            description.setAttribute('data-bs-toggle', 'tooltip');
+            description.setAttribute('data-bs-placement', 'bottom');
+            description.setAttribute('title', fullDescription);
 
             const footer = document.createElement('div');
             footer.className = 'card-footer bg-transparent border-top-0';
@@ -142,11 +172,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
             const sourceBadge = document.createElement('span');
             sourceBadge.className = 'badge bg-success me-1';
-            sourceBadge.textContent = item.source || 'Network';
+            sourceBadge.textContent = item.source || '网络';
             
             const channelBadge = document.createElement('span');
             channelBadge.className = 'badge bg-info me-1';
-            channelBadge.textContent = item.channel || 'Unknown';
+            channelBadge.textContent = item.channel || '未知';
             
             badges.appendChild(sourceBadge);
             badges.appendChild(channelBadge);
@@ -154,7 +184,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const transferButton = document.createElement('button');
             transferButton.className = 'btn btn-sm btn-outline-light';
             transferButton.innerHTML = '<i class="bi bi-send-plus"></i>';
-            transferButton.title = 'Send to Transfer';
+            transferButton.title = '发送到下载';
             transferButton.onclick = () => {
                 localStorage.setItem('shareUrlToTransfer', item.shareurl);
                 const navLink = document.querySelector('a.nav-link[data-page="transfer"]');
@@ -173,6 +203,12 @@ document.addEventListener('DOMContentLoaded', function () {
             card.appendChild(footer);
 
             resultsContainer.appendChild(card);
+        });
+
+        // Initialize tooltips after rendering
+        const tooltipTriggerList = Array.from(resultsContainer.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        tooltipTriggerList.forEach(tooltipTriggerEl => {
+            new bootstrap.Tooltip(tooltipTriggerEl);
         });
     };
 
