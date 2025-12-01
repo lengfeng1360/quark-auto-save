@@ -145,11 +145,27 @@
     }
     .file-card .file-name {
         color: #C9D1D9;
-        font-size: 0.9rem;
+        font-size: 0.85rem; /* 稍微减小字体大小 */
         text-align: center;
         overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        display: -webkit-box;
+        -webkit-line-clamp: 2; /* 限制最多显示2行 */
+        -webkit-box-orient: vertical;
+        line-height: 1.3; /* 设置行高 */
+        max-height: 2.6em; /* 2行文本的最大高度 */
+        word-break: break-all; /* 允许在任何字符处换行 */
+        padding: 0 4px; /* 添加一些水平内边距 */
+        white-space: normal; /* 允许换行 */
+    }
+    .file-card .file-name .common-prefix,
+    .file-card .file-name .common-suffix {
+        color: #8B949E;
+        font-weight: normal;
+    }
+
+    .file-card .file-name .unique-part {
+        color: #58A6FF;
+        font-weight: bold;
     }
     .file-card .file-size {
         color: #8B949E;
@@ -245,7 +261,7 @@
                 </div>
                  <div class="d-flex align-items-center mb-2">
                     <input type="checkbox" class="form-check-input me-2" id="selectAllCheckbox">
-                    <label for="selectAllCheckbox" class="form-check-label">Select All</label>
+                    <label for="selectAllCheckbox" class="form-check-label">全选</label>
                 </div>
                 <ul class="list-group" id="fileList">
                     <div class="loading-spinner">
@@ -711,5 +727,114 @@ function deleteSelectedFiles() {
             console.error('Error deleting files:', error);
             showError('Error while deleting');
         });
+}
+// 添加这个函数到您的JavaScript代码中
+function shortenFileName(fileName, allFileNames) {
+    // 如果只有一个文件，返回原文件名
+    if (!allFileNames || allFileNames.length <= 1) {
+        return fileName;
+    }
+    
+    // 找出所有文件名的共同前缀
+    let commonPrefix = '';
+    let minLen = Math.min(...allFileNames.map(name => name.length));
+    
+    for (let i = 0; i < minLen; i++) {
+        const char = allFileNames[0][i];
+        if (allFileNames.every(name => name[i] === char)) {
+            commonPrefix += char;
+        } else {
+            break;
+        }
+    }
+    
+    // 找出所有文件名的共同后缀
+    let commonSuffix = '';
+    for (let i = 0; i < minLen - commonPrefix.length; i++) {
+        const char = allFileNames[0][allFileNames[0].length - 1 - i];
+        if (allFileNames.every(name => name[name.length - 1 - i] === char)) {
+            commonSuffix = char + commonSuffix;
+        } else {
+            break;
+        }
+    }
+    
+    // 提取当前文件名的独特部分
+    const uniquePart = fileName.substring(
+        commonPrefix.length, 
+        fileName.length - commonSuffix.length
+    );
+    
+    // 如果独特部分太短，或者共同部分太短，返回原文件名
+    if (uniquePart.length < 3 || (commonPrefix.length + commonSuffix.length) < fileName.length * 0.5) {
+        return fileName;
+    }
+    
+    // 返回带有标记的HTML，用于样式化
+    return {
+        html: `<span class="common-prefix">${commonPrefix}</span><span class="unique-part">${uniquePart}</span><span class="common-suffix">${commonSuffix}</span>`,
+        title: fileName // 用于悬停提示
+    };
+}
+
+// 修改displayFileGrid函数
+function displayFileGrid(files) {
+    if (isVideoPlaying) {
+        return;
+    }
+    const contentArea = document.getElementById('contentArea');
+    
+    if (files.length === 0) {
+        contentArea.innerHTML = `
+            <div class="d-flex justify-content-center align-items-center h-100">
+                <div class="text-center">
+                    <i class="bi bi-folder-x" style="font-size: 5rem; color: #8B949E;"></i>
+                    <p class="text-muted">空目录</p>
+                </div>
+            </div>
+        `;
+        return;
+    }
+    
+    // 只显示视频文件
+    const videoFiles = files.filter(file => !file.is_dir && isVideoFile(file.name));
+    
+    if (videoFiles.length === 0) {
+        contentArea.innerHTML = `
+            <div class="d-flex justify-content-center align-items-center h-100">
+                <div class="text-center">
+                    <i class="bi bi-film" style="font-size: 5rem; color: #8B949E;"></i>
+                    <p class="text-muted">此目录中没有视频文件</p>
+                </div>
+            </div>
+        `;
+        return;
+    }
+    
+    // 获取所有视频文件名用于分析
+    const allVideoNames = videoFiles.map(file => file.name);
+    
+    let html = '<div class="file-grid">';
+    
+    videoFiles.forEach(file => {
+        // 使用shortenFileName函数处理文件名
+        const nameResult = shortenFileName(file.name, allVideoNames);
+        
+        html += `
+            <div class="file-card video-card" onclick="playVideo('${file.name}')">
+                <div class="file-icon">
+                    <i class="bi ${getFileIcon(file.name)}"></i>
+                </div>
+                <div class="play-overlay">
+                    <i class="bi bi-play-fill"></i>
+                </div>
+                <div class="file-name" title="${nameResult.title || file.name}">${nameResult.html || file.name}</div>
+                <div class="file-size">${formatBytes(file.size)}</div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    contentArea.innerHTML = html;
 }
 </script>
