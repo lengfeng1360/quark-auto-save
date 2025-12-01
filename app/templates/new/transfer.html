@@ -321,13 +321,24 @@ document.addEventListener('DOMContentLoaded', function() {
             checkbox.className = 'form-check-input me-3';
             checkbox.dataset.fid = file.fid;
             checkbox.dataset.fidToken = file.share_fid_token;
+
             checkbox.onchange = (e) => {
                 const isChecked = e.target.checked;
+                const listItem = e.target.closest('.list-group-item');
                 const subContainer = listItem.querySelector('.sub-container');
+                
+                // 1. 当勾选/取消勾选时，影响所有子项
                 if (subContainer) {
                     const childCheckboxes = subContainer.querySelectorAll('input[type="checkbox"]');
-                    childCheckboxes.forEach(child => child.checked = isChecked);
+                    childCheckboxes.forEach(child => {
+                        child.checked = isChecked;
+                        // 递归触发子项的 onchange，以处理更深层的嵌套
+                        child.dispatchEvent(new Event('change'));
+                    });
                 }
+                
+                // 2. 更新所有父级的状态
+                updateParentCheckboxState(e.target);
             };
             row.appendChild(checkbox);
 
@@ -429,26 +440,77 @@ document.addEventListener('DOMContentLoaded', function() {
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
     };
+    // 在 <script> 标签内，与 handleTransfer 同级
+    const updateParentCheckboxState = (changedCheckbox) => {
+        // 从当前复选框所在的列表项开始向上查找
+        let parentItem = changedCheckbox.closest('.sub-container')?.closest('.list-group-item');
+        
+        while (parentItem) {
+            const parentCheckbox = parentItem.querySelector('input[type="checkbox"]');
+            const siblingCheckboxes = parentItem.querySelector('.sub-container')?.querySelectorAll('input[type="checkbox"]');
+            
+            if (siblingCheckboxes && siblingCheckboxes.length > 0) {
+                const allChecked = Array.from(siblingCheckboxes).every(cb => cb.checked);
+                const someChecked = Array.from(siblingCheckboxes).some(cb => cb.checked);
+
+                parentCheckbox.checked = allChecked;
+                parentCheckbox.indeterminate = someChecked && !allChecked;
+            } else {
+                // 如果父文件夹没有子项（例如，还没展开），它的状态由自己决定
+                // 这种情况通常由点击事件直接处理
+            }
+
+            // 继续向上查找更上层的父级
+            parentItem = parentItem.parentElement.closest('.sub-container')?.closest('.list-group-item');
+        }
+    };
 
     const handleTransfer = () => {
-        const selectedCheckboxes = resultsContainer.querySelectorAll('input[type="checkbox"]:checked');
-        const fidsToTransfer = Array.from(selectedCheckboxes).map(cb => cb.dataset.fid);
-        const fidTokensToTransfer = Array.from(selectedCheckboxes).map(cb => cb.dataset.fidToken);
-        const savePath = document.getElementById('savePathInput').value.trim() || '/';
+        const allSelectedCheckboxes = resultsContainer.querySelectorAll('input[type="checkbox"]:checked');
+        const itemsToTransfer = [];
 
-        if (fidsToTransfer.length === 0) {
+        // 修改后的过滤逻辑
+        allSelectedCheckboxes.forEach(checkbox => {
+            // 检查父文件夹是否被“明确勾选”（checked: true 且 indeterminate: false）
+            const isParentExplicitlySelected = (childCheckbox) => {
+                const listItem = childCheckbox.closest('.list-group-item');
+                const subContainer = listItem.parentElement;
+                if (subContainer.id === 'transferResultsContainer') return false;
+                
+                const parentListItem = subContainer.closest('.list-group-item');
+                if (!parentListItem) return false;
+                
+                const parentCheckbox = parentListItem.querySelector('input[type="checkbox"]');
+                // 关键修改：只有当父项被选中且不是不确定状态时，才认为父项被选中
+                return parentCheckbox ? parentCheckbox.checked && !parentCheckbox.indeterminate : false;
+            };
+            
+            // 只有当父文件夹未被“明确勾选”时，才将当前项加入列表
+            if (!isParentExplicitlySelected(checkbox)) {
+                itemsToTransfer.push({
+                    fid: checkbox.dataset.fid,
+                    fid_token: checkbox.dataset.fidToken
+                });
+            }
+        });
+
+        if (itemsToTransfer.length === 0) {
             alert('Please select at least one file or folder to transfer.');
             return;
         }
 
+        const savePath = document.getElementById('savePathInput').value.trim() || '/';
         loadingSpinner.style.display = 'block';
         transferButton.disabled = true;
+
+        const fidsToTransfer = itemsToTransfer.map(item => item.fid);
+        const fidTokensToTransfer = itemsToTransfer.map(item => item.fid_token);
 
         axios.post('/api/transfer', {
             fids: fidsToTransfer,
             fid_tokens: fidTokensToTransfer,
             stoken: currentShareData.stoken,
-            pwd_id: currentShareData.pwd_id, // Make sure pwd_id is available in currentShareData
+            pwd_id: currentShareData.pwd_id,
             save_path: savePath
         })
         .then(response => {
