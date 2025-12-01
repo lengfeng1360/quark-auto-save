@@ -98,7 +98,7 @@ jobs:
         id: get_commit_messages
         run: |
           # Get the latest tag
-          LATEST_TAG=$(git describe --tags --abbrev=0 HEAD^)
+          LATEST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null)
 
           # If there is no latest tag, get only the latest commit message
           if [ -z "$LATEST_TAG" ]; then
