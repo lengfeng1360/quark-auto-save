@@ -749,57 +749,68 @@ def transfer_files_with_structure():
     items = data.get("items", [])
     stoken = data.get("stoken", "")
     pwd_id = data.get("pwd_id", "")
-    save_path = data.get("save_path", "/")
+    base_save_path = data.get("base_save_path", "/")
 
     if not items or not stoken or not pwd_id:
         return jsonify({"success": False, "message": "Missing required parameters."})
 
-    # 根据用户角色调整保存路径
-    save_path = _get_user_path(save_path, False)
+    save_path = _get_user_path(base_save_path, False)
     save_path = re.sub(r"/{2,}", "/", f"/{save_path}")
+    logging.info(f"save_path: {save_path}")
 
     account = Quark(config_data["cookie"][0])
+
+    # --- 步骤 1: 获取基础保存路径 save_path 的真实 fid ---
+    save_path_fid = "0"
+    if save_path != "/":
+        get_fids_res = account.get_fids([save_path])
+        if get_fids_res:
+            save_path_fid = get_fids_res[0]["fid"]
+        else:
+            mkdir_res = account.mkdir(save_path)
+            if mkdir_res and mkdir_res.get("code") == 0:
+                save_path_fid = mkdir_res["data"]["fid"]
+                logging.info(f"成功创建保存路径: {save_path}")
+            else:
+                return jsonify({"success": False, "message": f"无法创建或找到保存路径: {save_path}"})
     
-    # 创建一个字典来存储已创建的目录路径和对应的fid
-    created_dirs = {save_path: "0"}  # 假设根目录的fid是"0"
+    # --- 步骤 2: 统一的转存逻辑 ---
+    # 不再需要区分单个目录转存和选择性转存，所有情况都用此逻辑处理
+    logging.info(f"开始转存，共 {len(items)} 个项目。")
     
-    # 处理每个选中的项目
+    created_dirs = {save_path: save_path_fid}
+    
     for item in items:
         file_name = item.get("file_name", "")
         is_dir = item.get("is_dir", False)
-        item_path = item.get("path", "")
+        path_array = item.get('path', [])
         
-        # 确定目标目录路径
-        if is_dir:
-            # 如果是目录，目标路径是 save_path + 目录路径
-            target_dir_path = os.path.join(save_path, os.path.dirname(item_path))
-            target_file_name = os.path.basename(item_path)
-        else:
-            # 如果是文件，目标路径是 save_path + 文件所在目录路径
-            target_dir_path = os.path.join(save_path, os.path.dirname(item_path))
-            target_file_name = os.path.basename(item_path)
+        # 从路径数组中获取父目录路径数组
+        parent_path_array = path_array[:-1]
+        
+        # 将父目录数组拼接成字符串
+        parent_path_str = "/".join(parent_path_array)
+        
+        # 计算目标目录路径
+        target_dir_path = os.path.join(save_path, parent_path_str)
         
         # 确保目标目录存在
         if target_dir_path not in created_dirs:
-            # 尝试获取目录fid
             dir_fids = account.get_fids([target_dir_path])
             if dir_fids:
                 created_dirs[target_dir_path] = dir_fids[0]["fid"]
             else:
-                # 目录不存在，需要创建
                 mkdir_res = account.mkdir(target_dir_path)
-                if mkdir_res["code"] == 0:
+                if mkdir_res and mkdir_res.get("code") == 0:
                     created_dirs[target_dir_path] = mkdir_res["data"]["fid"]
                 else:
                     return jsonify({
                         "success": False, 
-                        "message": f"Failed to create directory {target_dir_path}: {mkdir_res.get('message')}"
+                        "message": f"无法创建目录 {target_dir_path}: {mkdir_res.get('message')}"
                     })
         
-        # 获取目标目录的fid
         target_dir_fid = created_dirs[target_dir_path]
         
-        # 转存文件/目录
         save_res = account.save_file(
             [item["fid"]], 
             [item["fid_token"]], 
@@ -808,26 +819,25 @@ def transfer_files_with_structure():
             stoken
         )
         
-        if save_res["code"] != 0:
+        if save_res.get("code") != 0:
             return jsonify({
                 "success": False, 
-                "message": f"Failed to transfer {item_path}: {save_res.get('message')}"
+                "message": f"转存 {file_name} 失败: {save_res.get('message')}"
             })
         
         # 如果是目录，需要更新created_dirs字典
         if is_dir:
-            # 获取转存后的目录fid
             task_id = save_res["data"]["task_id"]
             query_task_res = account.query_task(task_id)
-            if query_task_res["code"] == 0:
+            if query_task_res.get("code") == 0:
                 save_as_top_fids = query_task_res["data"]["save_as"]["save_as_top_fids"]
                 if save_as_top_fids:
-                    new_dir_path = os.path.join(target_dir_path, target_file_name)
+                    new_dir_path = os.path.join(target_dir_path, file_name)
                     created_dirs[new_dir_path] = save_as_top_fids[0]
     
     return jsonify({
         "success": True, 
-        "message": f"Successfully transferred {len(items)} items."
+        "message": f"成功转存 {len(items)} 个项目。"
     })
 
 @app.route("/api/transfer", methods=["POST"])

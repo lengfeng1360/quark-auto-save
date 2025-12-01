@@ -121,12 +121,10 @@
                     </div>
                 </div>
                 <div class="card-footer border-secondary bg-dark">
-                    <div class="input-group mb-2">
-                         <span class="input-group-text bg-secondary text-white border-secondary">保存到</span>
-                         <input type="text" class="form-control bg-dark text-white border-secondary" id="savePathInput" placeholder="/ (根目录) 或 /我的文件夹" value="/">
-                    </div>
-                    <div id="transferActions" class="d-flex justify-content-end">
-                        <button id="transferButton" class="btn btn-success" type="button"><i class="bi bi-cloud-download"></i> 转存</button>
+                    <div class="input-group">
+                        <span class="input-group-text bg-secondary text-white border-secondary">保存到</span>
+                        <input type="text" class="form-control bg-dark text-white border-secondary" id="savePathInput" placeholder="/ (根目录) 或 /我的文件夹" value="/">
+                        <button id="transferButton" class="btn btn-success" type="button" style="display: none;"><i class="bi bi-cloud-download"></i> 转存</button>
                     </div>
                 </div>
             </div>
@@ -182,7 +180,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const loadingSpinner = document.getElementById('loadingSpinner');
     const errorMessage = document.getElementById('errorMessage');
     const resultsContainer = document.getElementById('transferResultsContainer');
-    const transferActions = document.getElementById('transferActions');
+
     const transferButton = document.getElementById('transferButton');
 
     let currentShareData = {};
@@ -210,7 +208,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         pwd_id: response.data.data.pwd_id,
                         originalShareUrl: shareUrl
                     };
-                    transferActions.style.display = 'block';
+
+                    transferButton.style.display = 'inline-block';
                     document.getElementById('transferResultsSection').style.display = 'block';
                     renderResults(response.data.data, resultsContainer, true);
                     // If the root is a single folder, expand it immediately
@@ -221,7 +220,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
                 } else {
-                    transferActions.style.display = 'none';
+
+                    transferButton.style.display = 'none';
                     // Try to get error message from different possible fields
                     const errorMsg = response.data.data?.error || response.data.message || '无法解析链接。';
                     errorMessage.textContent = errorMsg;
@@ -506,14 +506,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 const listItem = checkbox.closest('.list-group-item');
                 const fileName = listItem.querySelector('.file-name-text').textContent;
                 const isDir = listItem.querySelector('.bi-folder-fill') !== null;
-                const relativePath = buildRelativePath(listItem);
+                const pathArray = buildRelativePath(listItem); 
 
                 itemsToTransfer.push({
                     fid: checkbox.dataset.fid,
                     fid_token: checkbox.dataset.fidToken,
                     file_name: fileName,
                     is_dir: isDir,
-                    path: relativePath
+                    path: pathArray // 直接使用数组
                 });
             }
         });
@@ -579,6 +579,6 @@ const buildRelativePath = (listItem) => {
         }
         current = current.parentElement.closest('.list-group-item');
     }
-    return parts.join('/');
+    return parts;
 };
 </script>
