@@ -679,6 +679,157 @@ def _get_user_path(path, isAlistpath=False):
         
     return re.sub(r'/{2,}', '/', final_path)
 
+def ensure_directory_exists(account, dir_path, created_dirs):
+    """
+    使用迭代方式确保目录存在，如果不存在则创建。
+    返回目录的fid。
+    created_dirs 用于缓存已创建的目录 {path: fid}。
+    """
+    # 规范化路径，处理多余的斜杠
+    dir_path = os.path.normpath(dir_path)
+    
+    # 如果已经是根目录，直接返回
+    if dir_path == os.sep:
+        return "0" # 假设根目录的fid是"0"
+
+    # 如果已经在缓存中，直接返回
+    if dir_path in created_dirs:
+        return created_dirs[dir_path]
+
+    # 从根目录开始，逐级构建路径
+    path_parts = dir_path.split(os.sep)
+    
+    # 处理绝对路径的第一个空元素
+    if path_parts[0] == '':
+        path_parts = path_parts[1:]
+    
+    current_path = ""
+    parent_fid = "0" # 假设根目录的fid是"0"
+
+    for part in path_parts:
+        current_path = os.path.join(current_path, part)
+
+        # 检查当前路径是否已在缓存中
+        if current_path in created_dirs:
+            parent_fid = created_dirs[current_path]
+            continue
+        
+        # 尝试获取目录，可能它已存在但不在缓存中
+        get_fids_res = account.get_fids([current_path])
+        if get_fids_res:
+            new_fid = get_fids_res[0]["fid"]
+            created_dirs[current_path] = new_fid
+            parent_fid = new_fid
+            print(f"ℹ️ 目录已存在: {current_path} (fid: {new_fid})")
+            continue
+
+        # 如果不存在，则创建它
+        # 注意：根据你的Quark类，mkdir可能需要pdir_fid参数
+        # 但你提供的mkdir方法签名是 mkdir(self, dir_path)，它似乎是处理完整路径的
+        # 如果是这样，我们直接传入current_path即可
+        mkdir_res = account.mkdir(current_path)
+        
+        if mkdir_res and mkdir_res.get("code") == 0:
+            new_fid = mkdir_res["data"]["fid"]
+            created_dirs[current_path] = new_fid
+            parent_fid = new_fid
+            print(f"✅ 目录已创建: {current_path} (fid: {new_fid})")
+        else:
+            error_msg = mkdir_res.get('message', 'Unknown error') if mkdir_res else 'Failed to get response'
+            raise Exception(f"❌ 无法创建或获取目录: {current_path}. 错误: {error_msg}")
+
+    return created_dirs[dir_path]
+
+@app.route("/api/transfer_with_structure", methods=["POST"])
+def transfer_files_with_structure():
+    if not is_login():
+        return jsonify({"success": False, "message": "未登录"})
+    
+    data = request.json
+    items = data.get("items", [])
+    stoken = data.get("stoken", "")
+    pwd_id = data.get("pwd_id", "")
+    save_path = data.get("save_path", "/")
+
+    if not items or not stoken or not pwd_id:
+        return jsonify({"success": False, "message": "Missing required parameters."})
+
+    # 根据用户角色调整保存路径
+    save_path = _get_user_path(save_path, False)
+    save_path = re.sub(r"/{2,}", "/", f"/{save_path}")
+
+    account = Quark(config_data["cookie"][0])
+    
+    # 创建一个字典来存储已创建的目录路径和对应的fid
+    created_dirs = {save_path: "0"}  # 假设根目录的fid是"0"
+    
+    # 处理每个选中的项目
+    for item in items:
+        file_name = item.get("file_name", "")
+        is_dir = item.get("is_dir", False)
+        item_path = item.get("path", "")
+        
+        # 确定目标目录路径
+        if is_dir:
+            # 如果是目录，目标路径是 save_path + 目录路径
+            target_dir_path = os.path.join(save_path, os.path.dirname(item_path))
+            target_file_name = os.path.basename(item_path)
+        else:
+            # 如果是文件，目标路径是 save_path + 文件所在目录路径
+            target_dir_path = os.path.join(save_path, os.path.dirname(item_path))
+            target_file_name = os.path.basename(item_path)
+        
+        # 确保目标目录存在
+        if target_dir_path not in created_dirs:
+            # 尝试获取目录fid
+            dir_fids = account.get_fids([target_dir_path])
+            if dir_fids:
+                created_dirs[target_dir_path] = dir_fids[0]["fid"]
+            else:
+                # 目录不存在，需要创建
+                mkdir_res = account.mkdir(target_dir_path)
+                if mkdir_res["code"] == 0:
+                    created_dirs[target_dir_path] = mkdir_res["data"]["fid"]
+                else:
+                    return jsonify({
+                        "success": False, 
+                        "message": f"Failed to create directory {target_dir_path}: {mkdir_res.get('message')}"
+                    })
+        
+        # 获取目标目录的fid
+        target_dir_fid = created_dirs[target_dir_path]
+        
+        # 转存文件/目录
+        save_res = account.save_file(
+            [item["fid"]], 
+            [item["fid_token"]], 
+            target_dir_fid, 
+            pwd_id, 
+            stoken
+        )
+        
+        if save_res["code"] != 0:
+            return jsonify({
+                "success": False, 
+                "message": f"Failed to transfer {item_path}: {save_res.get('message')}"
+            })
+        
+        # 如果是目录，需要更新created_dirs字典
+        if is_dir:
+            # 获取转存后的目录fid
+            task_id = save_res["data"]["task_id"]
+            query_task_res = account.query_task(task_id)
+            if query_task_res["code"] == 0:
+                save_as_top_fids = query_task_res["data"]["save_as"]["save_as_top_fids"]
+                if save_as_top_fids:
+                    new_dir_path = os.path.join(target_dir_path, target_file_name)
+                    created_dirs[new_dir_path] = save_as_top_fids[0]
+    
+    return jsonify({
+        "success": True, 
+        "message": f"Successfully transferred {len(items)} items."
+    })
+
 @app.route("/api/transfer", methods=["POST"])
 def transfer_files():
     if not is_login():

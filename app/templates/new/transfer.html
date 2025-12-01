@@ -465,53 +465,75 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    const handleTransfer = () => {
+        const handleTransfer = () => {
+        // 1. 获取所有被选中的复选框
         const allSelectedCheckboxes = resultsContainer.querySelectorAll('input[type="checkbox"]:checked');
+        
+        // 这个列表将保存我们最终要发送给后端的项目
         const itemsToTransfer = [];
 
-        // 修改后的过滤逻辑
-        allSelectedCheckboxes.forEach(checkbox => {
-            // 检查父文件夹是否被“明确勾选”（checked: true 且 indeterminate: false）
-            const isParentExplicitlySelected = (childCheckbox) => {
-                const listItem = childCheckbox.closest('.list-group-item');
-                const subContainer = listItem.parentElement;
-                if (subContainer.id === 'transferResultsContainer') return false;
-                
-                const parentListItem = subContainer.closest('.list-group-item');
-                if (!parentListItem) return false;
-                
-                const parentCheckbox = parentListItem.querySelector('input[type="checkbox"]');
-                // 关键修改：只有当父项被选中且不是不确定状态时，才认为父项被选中
-                return parentCheckbox ? parentCheckbox.checked && !parentCheckbox.indeterminate : false;
-            };
+        // 2. 定义一个辅助函数，用于检查一个项目的父文件夹是否被“明确勾选”
+        const isParentExplicitlySelected = (childCheckbox) => {
+            const listItem = childCheckbox.closest('.list-group-item');
+            const subContainer = listItem.parentElement;
             
-            // 只有当父文件夹未被“明确勾选”时，才将当前项加入列表
+            // 如果父容器就是根容器，说明它没有父文件夹
+            if (subContainer.id === 'transferResultsContainer') {
+                return false;
+            }
+            
+            // 找到父文件夹所在的列表项
+            const parentListItem = subContainer.closest('.list-group-item');
+            if (!parentListItem) {
+                return false; // 安全检查，理论上不应该发生
+            }
+            
+            // 找到父文件夹的复选框
+            const parentCheckbox = parentListItem.querySelector('input[type="checkbox"]');
+            
+            // 关键：只有当父项被选中 且 不是不确定状态 时，才认为父项被选中
+            return parentCheckbox ? parentCheckbox.checked && !parentCheckbox.indeterminate : false;
+        };
+
+        // 3. 遍历所有被选中的项目进行过滤
+        allSelectedCheckboxes.forEach(checkbox => {
+            // 如果一个项目的父文件夹没有被“明确勾选”，那么它就是一个需要独立操作的项目。
             if (!isParentExplicitlySelected(checkbox)) {
+                const listItem = checkbox.closest('.list-group-item');
+                const fileName = listItem.querySelector('.file-name-text').textContent;
+                const isDir = listItem.querySelector('.bi-folder-fill') !== null;
+                const relativePath = buildRelativePath(listItem);
+
                 itemsToTransfer.push({
                     fid: checkbox.dataset.fid,
-                    fid_token: checkbox.dataset.fidToken
+                    fid_token: checkbox.dataset.fidToken,
+                    file_name: fileName,
+                    is_dir: isDir,
+                    path: relativePath
                 });
             }
         });
 
+        // 4. 检查过滤后是否有需要传输的项目
         if (itemsToTransfer.length === 0) {
+            // 这种情况通常发生在用户只选中了子项，但其父项也隐含被选中时。
+            // 或者用户根本没有选中任何东西。
             alert('Please select at least one file or folder to transfer.');
             return;
         }
 
         const savePath = document.getElementById('savePathInput').value.trim() || '/';
+
+        // 5. 执行传输请求
         loadingSpinner.style.display = 'block';
         transferButton.disabled = true;
 
-        const fidsToTransfer = itemsToTransfer.map(item => item.fid);
-        const fidTokensToTransfer = itemsToTransfer.map(item => item.fid_token);
-
-        axios.post('/api/transfer', {
-            fids: fidsToTransfer,
-            fid_tokens: fidTokensToTransfer,
+        // 调用新的API端点
+        axios.post('/api/transfer_with_structure', {
+            items: itemsToTransfer,
+            base_save_path: savePath,
             stoken: currentShareData.stoken,
-            pwd_id: currentShareData.pwd_id,
-            save_path: savePath
+            pwd_id: currentShareData.pwd_id
         })
         .then(response => {
             loadingSpinner.style.display = 'none';
@@ -519,7 +541,8 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (response.data.success) {
                 alert(response.data.message);
-                // Optional: Uncheck all or refresh
+                // 可选：传输成功后取消所有选择
+                resultsContainer.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => cb.checked = false);
             } else {
                 alert('Transfer Failed: ' + response.data.message);
                 if(response.data.errors) {
@@ -541,4 +564,17 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initial check after listeners are set up
     populateShareUrl();
 });
+// 确保这个函数存在于您的 <script> 标签内
+const buildRelativePath = (listItem) => {
+    const parts = [];
+    let current = listItem;
+    while (current && current.id !== 'transferResultsContainer') {
+        const fileNameElement = current.querySelector('.file-name-text');
+        if (fileNameElement) {
+            parts.unshift(fileNameElement.textContent);
+        }
+        current = current.parentElement.closest('.list-group-item');
+    }
+    return parts.join('/');
+};
 </script>
