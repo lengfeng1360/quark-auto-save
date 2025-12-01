@@ -34,6 +34,7 @@ import re
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, parent_dir)
 from quark_auto_save import Quark, Config, MagicRename
+from plugins.alist import Alist
 
 print(
     r"""
@@ -602,34 +603,47 @@ def delete_file():
     else:
         response = {"success": False, "message": "缺失必要字段: fid"}
     return jsonify(response)
-def _get_user_path(path):
+def _get_user_path(path,isAlistpath=False):
     """
-    根据用户角色调整路径。
-    如果是普通用户，路径将基于 save_path_default/{username}。
+    根据用户角色和 Alist 插件配置调整路径。
+    - 如果是普通用户，路径将基于 Alist 挂载路径或 save_path_default 构建。
+    - Alist 路径优先级更高: /{alist_mount_path}/{username}/{path}
+    - 备用路径: /{save_path_default}/{username}/{path}
     """
     user_info = session.get('user', {})
-    if user_info.get('role') == 'user':
-        username = user_info.get('username')
-        if username:
-            if not path.startswith('/'):
-                path = '/' + path
-            
-            save_path_default = config_data.get("save_path_default", "/")
-            # 规范化 save_path_default
-            if not save_path_default.startswith('/'):
-                save_path_default = '/' + save_path_default
-            if save_path_default != "/" and save_path_default.endswith('/'):
-                save_path_default = save_path_default[:-1]
-                
-            if save_path_default == "/":
-                 path = f'/{username}{path}'
-            else:
-                 path = f'{save_path_default}/{username}{path}'
-            
-            # 清理多余的斜杠
-            path = re.sub(r'/{2,}', '/', path)
-            
-    return path
+    if user_info.get('role') != 'user':
+        return path
+    username = user_info.get('username')
+    if not username:
+        return path  # 无法处理匿名用户
+    prefix = ""
+    # 优先使用 Alist 插件的配置
+    alist_config = config_data.get("plugins", {}).get("alist", {})
+    if alist_config.get("url") and alist_config.get("token") and alist_config.get("storage_id"):
+        alist = Alist(**alist_config)
+        if alist.is_active and alist.storage_mount_path:
+            prefix = alist.storage_mount_path
+
+    save_path_default = config_data.get("save_path_default", "")
+    # 规范化 save_path_default
+    if save_path_default != "" and save_path_default.endswith('/'):
+        save_path_default = save_path_default[:-1]
+
+    
+    # 确保原始路径以斜杠开头
+    if not path.startswith('/'):
+        path = '/' + path
+    
+    # 组合最终路径
+    # 如果 path 是根目录'/'，则不需要再加
+    final_path = ''
+    if isAlistpath:
+        final_path = f"{prefix}/{save_path_default}/{username}{path}"
+    else:
+        final_path = f"{save_path_default}/{username}{path}" 
+    # 清理多余的斜杠
+    final_path = re.sub(r'/{2,}', '/', final_path)
+    return final_path
 
 @app.route("/api/transfer", methods=["POST"])
 def transfer_files():
@@ -644,7 +658,7 @@ def transfer_files():
     save_path = data.get("save_path", "/")
 
     # 根据用户角色调整保存路径
-    save_path = _get_user_path(save_path)
+    save_path = _get_user_path(save_path,False)
     
     if not fids or not stoken or not pwd_id:
         return jsonify({"success": False, "message": "Missing required parameters: fids, stoken, or pwd_id"})
@@ -761,7 +775,7 @@ def get_fs_list():
         path = data.get("path", "/")
         
         # 根据用户角色调整路径
-        path = _get_user_path(path)
+        path = _get_user_path(path,True)
         refresh = data.get("refresh", False)
         
         alist_config = config_data.get("plugins", {}).get("alist", {})
@@ -802,7 +816,7 @@ def get_file_info():
         path = data.get("path", "")
         
         # 根据用户角色调整路径
-        path = _get_user_path(path)
+        path = _get_user_path(path,True)
         password = data.get("password", "")
         
         alist_config = config_data.get("plugins", {}).get("alist", {})
@@ -842,7 +856,7 @@ def get_download_url():
             path = data.get("path", "")
         
         # 根据用户角色调整路径
-        path = _get_user_path(path)
+        path = _get_user_path(path,True)
 
         alist_config = config_data.get("plugins", {}).get("alist", {})
         if not alist_config.get("url") or not alist_config.get("token"):
