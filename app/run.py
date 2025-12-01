@@ -97,6 +97,32 @@ logging.basicConfig(
     format="[%(asctime)s][%(levelname)s] %(message)s",
     datefmt="%m-%d %H:%M:%S",
 )
+
+
+_alist_instance = None
+
+def get_alist_client():
+    """
+    单例模式获取 Alist 客户端实例。
+    如果配置未更改，直接返回缓存的实例，避免重复初始化。
+    """
+    global _alist_instance
+    if _alist_instance is None:
+        alist_config = config_data.get("plugins", {}).get("alist", {})
+        # 只有当配置存在且有效时才初始化
+        if alist_config.get("url") and alist_config.get("token"):
+            try:
+                _alist_instance = Alist(**alist_config)
+            except Exception as e:
+                logging.error(f"初始化 Alist 插件失败: {e}")
+                return None
+    return _alist_instance
+
+def reset_alist_client():
+    """强制重置 Alist 实例（用于配置更新后）"""
+    global _alist_instance
+    _alist_instance = None
+
 # 过滤werkzeug日志输出
 if not DEBUG:
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
@@ -332,6 +358,10 @@ def update():
     config_data = deep_merge(update_data, config_data)
     
     Config.write_json(CONFIG_PATH, config_data)
+
+    # --- 新增：配置更新后，重置 Alist 实例 ---
+    reset_alist_client()
+    
     # 重新加载任务
     if reload_tasks():
         logging.info(f">>> 配置更新成功")
@@ -603,47 +633,45 @@ def delete_file():
     else:
         response = {"success": False, "message": "缺失必要字段: fid"}
     return jsonify(response)
-def _get_user_path(path,isAlistpath=False):
+def _get_user_path(path, isAlistpath=False):
     """
-    根据用户角色和 Alist 插件配置调整路径。
-    - 如果是普通用户，路径将基于 Alist 挂载路径或 save_path_default 构建。
-    - Alist 路径优先级更高: /{alist_mount_path}/{username}/{path}
-    - 备用路径: /{save_path_default}/{username}/{path}
+    根据用户角色和 Alist 插件配置调整路径 (优化版)。
     """
     user_info = session.get('user', {})
+    
+    # 管理员不需要路径前缀处理，直接返回原路径
     if user_info.get('role') != 'user':
         return path
+        
     username = user_info.get('username')
     if not username:
-        return path  # 无法处理匿名用户
+        return path
+        
     prefix = ""
-    # 优先使用 Alist 插件的配置
-    alist_config = config_data.get("plugins", {}).get("alist", {})
-    if alist_config.get("url") and alist_config.get("token") and alist_config.get("storage_id"):
-        alist = Alist(**alist_config)
-        if alist.is_active and alist.storage_mount_path:
-            prefix = alist.storage_mount_path
+    
+    # --- 优化点：获取单例实例，不再每次 new ---
+    alist = get_alist_client()
+    if alist and alist.is_active and alist.storage_mount_path:
+        prefix = alist.storage_mount_path
+    # ---------------------------------------
 
     save_path_default = config_data.get("save_path_default", "")
-    # 规范化 save_path_default
+
     if save_path_default != "" and save_path_default.endswith('/'):
         save_path_default = save_path_default[:-1]
 
-    
-    # 确保原始路径以斜杠开头
+
     if not path.startswith('/'):
         path = '/' + path
     
-    # 组合最终路径
-    # 如果 path 是根目录'/'，则不需要再加
+
     final_path = ''
     if isAlistpath:
         final_path = f"{prefix}/{save_path_default}/{username}{path}"
     else:
-        final_path = f"{save_path_default}/{username}{path}" 
-    # 清理多余的斜杠
-    final_path = re.sub(r'/{2,}', '/', final_path)
-    return final_path
+        final_path = f"{save_path_default}/{username}{path}"
+        
+    return re.sub(r'/{2,}', '/', final_path)
 
 @app.route("/api/transfer", methods=["POST"])
 def transfer_files():
@@ -900,6 +928,107 @@ def get_download_url():
     except Exception as e:
         logging.error(f"Error getting download URL: {str(e)}")
         return jsonify({"success": False, "message": str(e)})
+
+@app.route("/api/library/fs/delete", methods=["POST"])
+def delete_fs_items():
+    if not is_login():
+        return jsonify({"success": False, "message": "未登录"})
+    
+    try:
+        # 1. 检查配置并初始化 Quark
+        if not config_data.get("cookie") or not config_data["cookie"][0]:
+            return jsonify({"success": False, "message": "夸克 Cookie 未配置，无法执行删除操作"})
+        account = Quark(config_data["cookie"][0])
+
+        data = request.json
+        paths_to_delete = data.get("paths", [])
+        if not paths_to_delete:
+            return jsonify({"success": False, "message": "缺少 'paths' 参数"})
+
+        # 2. 预处理：按父目录分组，减少网络请求次数
+        # 结构: { "父目录路径": ["文件名1", "文件名2"] }
+        from collections import defaultdict
+        files_by_parent = defaultdict(list)
+
+        for raw_path in paths_to_delete:
+            # 【关键修改】isAlistpath=False
+            # 我们需要网盘内的真实路径（如 /save/user/file），而不是 Alist 的挂载路径（如 /quarktv/save/user/file）
+            real_path = _get_user_path(raw_path, False) 
+            
+            # 分离父目录和文件名
+            parent_dir = os.path.dirname(real_path)
+            file_name = os.path.basename(real_path)
+            
+            # 根目录修正
+            if parent_dir == "/" or parent_dir == "":
+                parent_dir = "/"
+                
+            files_by_parent[parent_dir].append(file_name)
+
+        logging.info(f">>> 正在解析 {len(paths_to_delete)} 个文件的 FID...")
+
+        fids_to_delete = []
+
+        # 3. 遍历父目录，查找目标文件的 FID
+        for parent_dir, file_names in files_by_parent.items():
+            # 获取父目录的 FID
+            # get_fids 返回 [{'fid': 'xxx', ...}]
+            dir_info_list = account.get_fids([parent_dir])
+            
+            if not dir_info_list:
+                logging.warning(f"无法找到父目录: {parent_dir}，跳过该目录下的文件")
+                continue
+                
+            # 提取父目录 FID (通常结果列表对应输入列表，取第一个)
+            parent_obj = dir_info_list[0]
+            if not parent_obj or 'fid' not in parent_obj:
+                logging.warning(f"解析父目录FID失败: {parent_dir}")
+                continue
+                
+            parent_fid = parent_obj['fid']
+
+            # 列出父目录下的所有文件
+            ls_res = account.ls_dir(parent_fid)
+            if ls_res.get('code') != 0:
+                logging.warning(f"列出目录失败: {parent_dir}, 错误: {ls_res.get('message')}")
+                continue
+
+            # 构建 {文件名: FID} 映射表
+            current_dir_files = ls_res.get('data', {}).get('list', [])
+            name_to_fid = {item['file_name']: item['fid'] for item in current_dir_files}
+
+            # 匹配我们要删除的文件
+            for target_name in file_names:
+                if target_name in name_to_fid:
+                    fids_to_delete.append(name_to_fid[target_name])
+                else:
+                    logging.warning(f"文件未在网盘中找到: {target_name} (位于 {parent_dir})")
+
+        if not fids_to_delete:
+            return jsonify({"success": False, "message": "未找到任何有效的文件FID，无法删除"})
+
+        logging.info(f">>> 准备删除 FID 列表: {fids_to_delete}")
+
+        # 4. 执行删除
+        result = account.delete(fids_to_delete)
+
+        # 5. 处理结果
+        # Quark API 通常 code=0 表示成功，或者 result 为 True
+        if isinstance(result, dict):
+            if result.get("code") == 0 or result.get("errno") == 0:
+                return jsonify({"success": True, "message": f"成功删除 {len(fids_to_delete)} 个项目"})
+            else:
+                msg = result.get("message") or result.get("error") or "未知错误"
+                return jsonify({"success": False, "message": f"删除失败: {msg}"})
+        elif result is True:
+             return jsonify({"success": True, "message": "删除成功"})
+        else:
+             return jsonify({"success": False, "message": f"删除返回异常: {result}"})
+
+    except Exception as e:
+        logging.error(f"删除操作异常: {str(e)}")
+        logging.error(traceback.format_exc())
+        return jsonify({"success": False, "message": f"服务端异常: {str(e)}"})
 
 # 添加任务接口
 @app.route("/api/add_task", methods=["POST"])
