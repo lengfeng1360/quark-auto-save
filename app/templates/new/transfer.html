@@ -266,6 +266,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Update stoken in case it gets refreshed
                 currentShareData.stoken = response.data.data.stoken;
                 renderResults(response.data.data, container, false);
+                
+                // 修复：检查父目录复选框状态并应用到子项
+                const parentListItem = container.closest('.list-group-item');
+                if (parentListItem) {
+                    const parentCheckbox = parentListItem.querySelector('input[type="checkbox"]');
+                    if (parentCheckbox && parentCheckbox.checked) {
+                        // 如果父目录被选中，则选中所有子项
+                        const childCheckboxes = container.querySelectorAll('input[type="checkbox"]');
+                        childCheckboxes.forEach(child => {
+                            child.checked = true;
+                        });
+                    }
+                }
             } else {
                 // Show error inside the folder's container
                 container.innerHTML = `<li class="list-group-item bg-dark text-danger">错误: ${response.data.data.error}</li>`;
@@ -469,8 +482,47 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-        const handleTransfer = () => {
-        // 1. 获取所有被选中的复选框
+        /**
+     * 显示一个 Toast 通知
+     * @param {string} message - 要显示的消息
+     * @param {'success'|'danger'} type - 通知类型 (成功或失败)
+     */
+    const showToast = (message, type = 'success') => {
+        const toastContainer = document.querySelector('.toast-container');
+        if (!toastContainer) {
+            console.error("Toast container not found!");
+            alert(message); // 降级为 alert
+            return;
+        }
+
+        const toastId = 'toast-' + Date.now();
+        const bgClass = type === 'success' ? 'bg-success' : 'bg-danger';
+        const iconClass = type === 'success' ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill';
+
+        const toastHTML = `
+            <div id="${toastId}" class="toast align-items-center text-white ${bgClass} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="d-flex">
+                    <div class="toast-body">
+                        <i class="bi ${iconClass} me-2"></i>${message}
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+            </div>
+        `;
+        
+        toastContainer.insertAdjacentHTML('beforeend', toastHTML);
+        const toastElement = document.getElementById(toastId);
+        const toast = new bootstrap.Toast(toastElement, { delay: 5000 }); // 5秒后自动消失
+        toast.show();
+
+        // Toast 隐藏后从 DOM 中移除，避免页面堆积
+        toastElement.addEventListener('hidden.bs.toast', () => {
+            toastElement.remove();
+        });
+    };
+
+    // --- 修改 handleTransfer 函数 ---
+    const handleTransfer = () => {
         const allSelectedCheckboxes = resultsContainer.querySelectorAll('input[type="checkbox"]:checked');
         
         // 这个列表将保存我们最终要发送给后端的项目
@@ -520,9 +572,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 4. 检查过滤后是否有需要传输的项目
         if (itemsToTransfer.length === 0) {
-            // 这种情况通常发生在用户只选中了子项，但其父项也隐含被选中时。
-            // 或者用户根本没有选中任何东西。
-            alert('请至少选择一个文件或文件夹进行下载。');
+            // 使用 showToast 替换 alert
+            showToast('请至少选择一个文件或文件夹进行转存。', 'danger');
             return;
         }
 
@@ -544,21 +595,30 @@ document.addEventListener('DOMContentLoaded', function() {
             transferButton.disabled = false;
             
             if (response.data.success) {
-                alert(response.data.message);
+                // 使用 showToast 替换 alert
+                showToast(response.data.message || '转存任务已成功提交！', 'success');
+                
                 // 可选：传输成功后取消所有选择
-                resultsContainer.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => cb.checked = false);
+                // resultsContainer.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => cb.checked = false);
+
             } else {
-                alert('下载失败: ' + response.data.message);
+                // 使用 showToast 替换 alert
+                showToast('转存失败: ' + (response.data.message || '未知错误'), 'danger');
                 if(response.data.errors) {
-                    console.error(response.data.errors);
+                    console.error('详细错误:', response.data.errors);
                 }
             }
         })
         .catch(error => {
              loadingSpinner.style.display = 'none';
              transferButton.disabled = false;
-             console.error('下载时出错:', error);
-             alert('发生意外错误。');
+             console.error('转存时发生网络错误:', error);
+             let errorMsg = '发生意外错误，请检查网络连接或联系管理员。';
+             if (error.response && error.response.data && error.response.data.message) {
+                 errorMsg = error.response.data.message;
+             }
+             // 使用 showToast 替换 alert
+             showToast(errorMsg, 'danger');
         });
     };
 
