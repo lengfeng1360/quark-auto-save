@@ -4,7 +4,15 @@
         background-color: #495057;
         border-color: #6c757d;
     }
-    
+    .input-card {
+        min-height: 210px; /* 你可以根据需要调整这个值 */
+        height: auto;      /* 确保内容多时可以撑开 */
+    }
+    .results-card {
+        min-height: 320px; /* 你可以根据需要调整这个值 */
+        height: auto;      /* 确保内容多时可以撑开 */
+        max-height: 60vh;        /* 关键：最大高度不超过视口（屏幕）高度的90% */
+    }
     .form-check-input:checked {
         background-color: #0d6efd;
         border-color: #0d6efd;
@@ -83,7 +91,7 @@
     <!-- Input Card Section -->
     <div class="row justify-content-center mb-4">
         <div class="col-lg-8 mx-auto">
-            <div class="card bg-dark text-white border-secondary shadow-sm">
+            <div class="card bg-dark text-white border-secondary shadow-sm input-card">
                 <div class="card-body p-4">
                     <h5 class="card-title mb-3"><i class="bi bi-link-45deg"></i> 解析分享链接</h5>
                     <div class="mb-3">
@@ -112,7 +120,7 @@
     <!-- Results Section -->
     <div id="transferResultsSection" class="row justify-content-center mt-4" style="display: none;">
         <div class="col-lg-8 mx-auto">
-            <div class="card bg-dark text-white border-secondary shadow-sm">
+            <div class="card bg-dark text-white border-secondary shadow-sm results-card">
                 <div class="card-header border-secondary d-flex justify-content-between align-items-center bg-dark">
                     <h5 class="mb-0 mx-auto"><i class="bi bi-folder2-open"></i> 文件列表</h5>
                 </div>

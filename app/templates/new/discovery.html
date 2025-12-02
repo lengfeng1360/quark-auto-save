@@ -12,14 +12,9 @@
         border: 2px solid #161B22;
     }
 
-    /* 确保整个页面容器占满视口高度 */
-    html, body {
-        height: 100%;
-    }
-    
     /* 主容器使用 flex 布局 */
     .container-fluid {
-        height: calc(100vh - 56px); /* 减去导航栏高度，假设为56px */
+        height: 100%;
         display: flex;
         flex-direction: column;
         padding-top: 1rem; /* 顶部留白 */
@@ -132,7 +127,7 @@
         margin: 1rem 0;
     }
 </style>
-<div class="container-fluid mt-4">
+<div class="container-fluid pt-4">
     <div class="row justify-content-center">
         <div class="col-md-8 text-center">
             <div id="discoveryHeader">
