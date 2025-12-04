@@ -158,7 +158,8 @@
         white-space: normal; /* 允许换行 */
     }
     .file-card .file-name .common-prefix,
-    .file-card .file-name .common-suffix {
+    .file-card .file-name .common-suffix,
+    .file-card .file-name .common-part {
         color: #8B949E;
         font-weight: normal;
     }
@@ -728,52 +729,122 @@ function deleteSelectedFiles() {
             showError('Error while deleting');
         });
 }
-// 添加这个函数到您的JavaScript代码中
-function shortenFileName(fileName, allFileNames) {
-    // 如果只有一个文件，返回原文件名
-    if (!allFileNames || allFileNames.length <= 1) {
-        return fileName;
+function findCommonSubstrings(strList) {
+    // 边界情况处理：如果数组为空
+    if (!strList || strList.length === 0) {
+        return [];
     }
-    
-    // 找出所有文件名的共同前缀
-    let commonPrefix = '';
-    let minLen = Math.min(...allFileNames.map(name => name.length));
-    
-    for (let i = 0; i < minLen; i++) {
-        const char = allFileNames[0][i];
-        if (allFileNames.every(name => name[i] === char)) {
-            commonPrefix += char;
-        } else {
-            break;
+
+    // 1. 为了优化性能，找到长度最短的字符串作为基准 (Reference)
+    const shortestStr = strList.reduce((a, b) => a.length <= b.length ? a : b);
+    const n = shortestStr.length;
+
+    const commonCandidates = new Set();
+
+    // 2. 获取基准字符串的所有子串，并检查是否在其他所有字符串中出现
+    // 外层循环遍历所有可能的长度
+    for (let length = 1; length <= n; length++) {
+        // 内层循环遍历该长度下的所有起始位置
+        for (let i = 0; i <= n - length; i++) {
+            const sub = shortestStr.substring(i, i + length);
+
+            // 检查这个子串是否存在于数组的所有字符串中
+            if (strList.every(s => s.includes(sub))) {
+                commonCandidates.add(sub);
+            }
         }
     }
-    
-    // 找出所有文件名的共同后缀
-    let commonSuffix = '';
-    for (let i = 0; i < minLen - commonPrefix.length; i++) {
-        const char = allFileNames[0][allFileNames[0].length - 1 - i];
-        if (allFileNames.every(name => name[name.length - 1 - i] === char)) {
-            commonSuffix = char + commonSuffix;
-        } else {
-            break;
+
+    // 如果没有公共子串，直接返回空
+    if (commonCandidates.size === 0) {
+        return [];
+    }
+
+    // 3. 提取“极大”子串
+    // 先将候选子串按长度从长到短排序
+    const sortedCandidates = Array.from(commonCandidates).sort((a, b) => b.length - a.length);
+
+    const result = [];
+
+    for (const cand of sortedCandidates) {
+        // 检查当前 cand 是否是 result 中已存在的某个字符串的子串
+        let isSubset = false;
+        for (const existing in result) {
+            if (result[existing].includes(cand)) {
+                isSubset = true;
+                break;
+            }
+        }
+
+        // 如果它不是任何现有结果的子集，则将其加入结果
+        if (!isSubset) {
+            result.push(cand);
         }
     }
-    
-    // 提取当前文件名的独特部分
-    const uniquePart = fileName.substring(
-        commonPrefix.length, 
-        fileName.length - commonSuffix.length
-    );
-    
-    // 如果独特部分太短，或者共同部分太短，返回原文件名
-    if (uniquePart.length < 3 || (commonPrefix.length + commonSuffix.length) < fileName.length * 0.5) {
+
+    return result;
+}
+
+function highlightFileName(fileName, commonSubstrings) {
+    if (!commonSubstrings || commonSubstrings.length === 0) {
         return fileName;
     }
-    
-    // 返回带有标记的HTML，用于样式化
+
+    // 创建一个布尔数组标记哪些字符是公共部分
+    const isCommon = new Array(fileName.length).fill(false);
+
+    // 对每个公共子串，在文件名中找到所有出现位置并标记
+    const sortedCommons = [...commonSubstrings].sort((a, b) => b.length - a.length);
+
+    for (const sub of sortedCommons) {
+        let startPos = 0;
+        while (true) {
+            const index = fileName.indexOf(sub, startPos);
+            if (index === -1) break;
+
+            // 标记该区间的字符为公共
+            for (let k = 0; k < sub.length; k++) {
+                isCommon[index + k] = true;
+            }
+            startPos = index + 1; // 继续查找下一个（允许重叠查找，但标记是幂等的）
+        }
+    }
+
+    // 根据标记构建 HTML
+    let html = '';
+    let currentType = null; // 'common' or 'unique'
+    let buffer = '';
+
+    for (let i = 0; i < fileName.length; i++) {
+        const type = isCommon[i] ? 'common' : 'unique';
+
+        if (type !== currentType) {
+            if (buffer) {
+                if (currentType === 'common') {
+                    html += `<span class="common-part">${buffer}</span>`;
+                } else {
+                    html += `<span class="unique-part">${buffer}</span>`;
+                }
+            }
+            buffer = fileName[i];
+            currentType = type;
+        } else {
+            buffer += fileName[i];
+        }
+    }
+
+    // 处理最后一个片段
+    if (buffer) {
+        if (currentType === 'common') {
+            html += `<span class="common-part">${buffer}</span>`;
+        } else {
+            html += `<span class="unique-part">${buffer}</span>`;
+        }
+    }
+
     return {
-        html: `<span class="common-prefix">${commonPrefix}</span><span class="unique-part">${uniquePart}</span><span class="common-suffix">${commonSuffix}</span>`,
-        title: fileName // 用于悬停提示
+        html: html,
+        title: fileName
     };
 }
 
@@ -813,12 +884,16 @@ function displayFileGrid(files) {
     
     // 获取所有视频文件名用于分析
     const allVideoNames = videoFiles.map(file => file.name);
+    // 计算公共子串
+    const commonSubstrings = findCommonSubstrings(allVideoNames);
     
     let html = '<div class="file-grid">';
     
     videoFiles.forEach(file => {
-        // 使用shortenFileName函数处理文件名
-        const nameResult = shortenFileName(file.name, allVideoNames);
+        // 使用 highlightFileName 函数处理文件名
+        const nameResult = highlightFileName(file.name, commonSubstrings);
+        const displayHtml = typeof nameResult === 'string' ? nameResult : nameResult.html;
+        const displayTitle = typeof nameResult === 'string' ? file.name : nameResult.title;
         
         html += `
             <div class="file-card video-card" onclick="playVideo('${file.name}')">
@@ -828,7 +903,7 @@ function displayFileGrid(files) {
                 <div class="play-overlay">
                     <i class="bi bi-play-fill"></i>
                 </div>
-                <div class="file-name" title="${nameResult.title || file.name}">${nameResult.html || file.name}</div>
+                <div class="file-name" title="${displayTitle}">${displayHtml}</div>
                 <div class="file-size">${formatBytes(file.size)}</div>
             </div>
         `;
