@@ -284,6 +284,21 @@
         border-color: #1f6feb;
         background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23ffffff'/%3e%3c/svg%3e");
     }
+    .video-loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.7);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 20;
+        border-radius: 8px;
+        color: white;
+    }
 </style>
 <div class="container-fluid">
     <div class="row">
@@ -346,6 +361,7 @@ let playerSettings = {
     skipStart: 0,
     skipEnd: 0
 };
+let isRequestingVideo = false;
 
 // 页面显示时初始化
 document.addEventListener('showPage', function(event) {
@@ -629,6 +645,12 @@ function updateBreadcrumb(path) {
 }
 
 function playVideo(fileName) {
+    if (isRequestingVideo) return;
+    isRequestingVideo = true;
+
+    // 立即显示播放界面（加载状态）
+    showVideoPlayerLoading(fileName);
+
     const filePath = currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`;
     console.log('Playing video:', fileName, 'at path:', filePath);
     
@@ -638,19 +660,24 @@ function playVideo(fileName) {
             console.log('Download response:', response);
             if (response.data.success) {
                 const downloadUrl = response.data.data.download_url;
-                showVideoPlayer(fileName, downloadUrl);
+                // 更新播放器源并开始播放
+                updateVideoPlayerSource(fileName, downloadUrl);
             } else {
                 console.error('Failed to get video URL:', response.data);
-                showError('获取视频 URL 失败: ' + response.data.message);
+                // 在播放器界面显示错误
+                showVideoPlayerError('获取视频地址失败: ' + response.data.message);
             }
         })
         .catch(error => {
             console.error('Error getting video URL:', error);
-            showError('获取视频 URL 失败: ' + error.message);
+            showVideoPlayerError('网络请求失败: ' + error.message);
+        })
+        .finally(() => {
+            isRequestingVideo = false;
         });
 }
 
-function showVideoPlayer(fileName, videoUrl) {
+function showVideoPlayerLoading(fileName) {
     isVideoPlaying = true;
     const contentArea = document.getElementById('contentArea');
     
@@ -658,13 +685,74 @@ function showVideoPlayer(fileName, videoUrl) {
     const nameResult = highlightFileName(fileName, currentVideoCommonSubstrings);
     displayName = typeof nameResult === 'string' ? nameResult : nameResult.html;
 
+    // 如果播放器已经存在，只更新信息和显示遮罩
+    const existingContainer = document.querySelector('.video-container');
+    if (existingContainer) {
+        // 更新标题
+        const titleEl = existingContainer.querySelector('.video-info h5');
+        if (titleEl) {
+            titleEl.title = fileName;
+            titleEl.innerHTML = displayName;
+        }
+        
+        // 确保遮罩存在
+        let overlay = existingContainer.querySelector('.video-loading-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.className = 'video-loading-overlay';
+            // 插入到 video 元素之前或之后，这里插入到 container 的开头，并覆盖在 video 上
+            // 但 video-player 有 margin-bottom，所以最好是覆盖在 video-player 的 wrapper 上
+            // 简单处理：插入到 container 中，通过 z-index 覆盖
+            // 为了定位准确，overlay 需要 absolute 定位，且 container 需要 relative (已设置)
+            // overlay 高度应该是 video 的高度
+            const videoEl = existingContainer.querySelector('.video-player');
+            if (videoEl) {
+                // 设置 overlay 大小位置匹配 video
+                // 由于 CSS 中 .video-loading-overlay 已经是 absolute top 0 left 0 width 100% height 100%
+                // 但 container 包含 info，我们只想覆盖 video 部分。
+                // 方案：把 video 包裹在一个 wrapper 里，或者动态设置 overlay 高度。
+                // 简单点：overlay 只覆盖 video 区域。
+                // CSS 中修改一下，或者这里动态设置 style
+                overlay.style.height = videoEl.offsetHeight + 'px'; // 临时对齐高度
+            }
+            existingContainer.insertBefore(overlay, existingContainer.firstChild);
+        }
+        
+        overlay.innerHTML = `
+            <div class="spinner-border text-primary mb-2" role="status" style="width: 3rem; height: 3rem;">
+                <span class="visually-hidden">加载中...</span>
+            </div>
+            <div>正在解析视频地址...</div>
+        `;
+        overlay.style.display = 'flex';
+        
+        // 暂停旧视频并替换元素以清除之前的事件监听器
+        const video = document.getElementById('mainVideoPlayer');
+        if (video) {
+            video.pause();
+            const newVideo = video.cloneNode(true);
+            newVideo.removeAttribute('src');
+            video.parentNode.replaceChild(newVideo, video);
+        }
+        return;
+    }
+
+    // 如果播放器不存在，创建新的结构
     contentArea.innerHTML = `
         <div class="video-container">
-             <button class="close-video-btn" onclick="closeVideoPlayer()">&times;</button>
-            <video id="mainVideoPlayer" class="video-player" controls autoplay>
-                <source src="${videoUrl}" type="video/mp4">
-                您的浏览器不支持 video 标签。
-            </video>
+            <button class="close-video-btn" onclick="closeVideoPlayer()">&times;</button>
+            
+            <div class="video-wrapper" style="position: relative;">
+                <div class="video-loading-overlay">
+                    <div class="spinner-border text-primary mb-2" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">加载中...</span>
+                    </div>
+                    <div>正在解析视频地址...</div>
+                </div>
+                <video id="mainVideoPlayer" class="video-player" controls autoplay>
+                    您的浏览器不支持 video 标签。
+                </video>
+            </div>
             
             <div class="video-controls">
                 <div class="video-control-item form-switch">
@@ -687,8 +775,35 @@ function showVideoPlayer(fileName, videoUrl) {
             </div>
         </div>
     `;
+}
 
-    setupVideoPlayerListeners(fileName);
+function updateVideoPlayerSource(fileName, videoUrl) {
+    const video = document.getElementById('mainVideoPlayer');
+    const overlay = document.querySelector('.video-loading-overlay');
+    
+    if (video) {
+        video.src = videoUrl;
+        video.load();
+        video.play().catch(e => console.log('Autoplay prevented:', e));
+        
+        // 重新绑定事件监听器 (因为 playNextVideo 可能会依赖新的文件名)
+        setupVideoPlayerListeners(fileName);
+    }
+    
+    if (overlay) {
+        overlay.style.display = 'none';
+    }
+}
+
+function showVideoPlayerError(errorMessage) {
+    const overlay = document.querySelector('.video-loading-overlay');
+    if (overlay) {
+        overlay.innerHTML = `
+            <i class="bi bi-exclamation-circle text-danger mb-2" style="font-size: 3rem;"></i>
+            <div class="text-danger">${errorMessage}</div>
+            <button class="btn btn-sm btn-outline-light mt-3" onclick="closeVideoPlayer()">关闭</button>
+        `;
+    }
 }
 
 function loadPlayerSettings() {
@@ -743,6 +858,46 @@ function setupVideoPlayerListeners(currentFileName) {
         }
     });
 }
+
+// 全局键盘事件监听
+document.addEventListener('keydown', function(event) {
+    if (!isVideoPlaying) return;
+    
+    const video = document.getElementById('mainVideoPlayer');
+    if (!video) return;
+
+    // 避免在输入框中打字时触发快捷键
+    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+        return;
+    }
+
+    switch(event.code) {
+        case 'Space':
+            event.preventDefault(); // 防止页面滚动
+            if (video.paused) {
+                video.play();
+            } else {
+                video.pause();
+            }
+            break;
+        case 'ArrowLeft':
+            event.preventDefault();
+            video.currentTime = Math.max(0, video.currentTime - 10);
+            break;
+        case 'ArrowRight':
+            event.preventDefault();
+            video.currentTime = Math.min(video.duration, video.currentTime + 10);
+            break;
+        case 'ArrowUp':
+            event.preventDefault();
+            video.volume = Math.min(1, video.volume + 0.1);
+            break;
+        case 'ArrowDown':
+            event.preventDefault();
+            video.volume = Math.max(0, video.volume - 0.1);
+            break;
+    }
+});
 
 function playNextVideo(currentFileName) {
     // 找到当前目录下的所有视频文件
