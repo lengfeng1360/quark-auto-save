@@ -159,12 +159,16 @@
     }
     .file-card .file-name .common-prefix,
     .file-card .file-name .common-suffix,
-    .file-card .file-name .common-part {
+    .file-card .file-name .common-part,
+    .list-group-item .common-part,
+    .video-info .common-part {
         color: #8B949E;
         font-weight: normal;
     }
 
-    .file-card .file-name .unique-part {
+    .file-card .file-name .unique-part,
+    .list-group-item .unique-part,
+    .video-info .unique-part {
         color: #58A6FF;
         font-weight: bold;
     }
@@ -294,6 +298,7 @@
 <script>
 let currentPath = '/';
 let currentFiles = [];
+let currentVideoCommonSubstrings = [];
 let isVideoPlaying = false;
 let libraryInitialized = false;
 let selectedFiles = new Set();
@@ -403,6 +408,12 @@ function loadFileList(path, refresh = false) {
         .then(response => {
             if (response.data.success) {
                 currentFiles = response.data.data.content || [];
+                
+                // 计算当前目录视频文件的公共子串
+                const videoFiles = currentFiles.filter(file => !file.is_dir && isVideoFile(file.name));
+                const allVideoNames = videoFiles.map(file => file.name);
+                currentVideoCommonSubstrings = findCommonSubstrings(allVideoNames);
+
                 displayFileList(currentFiles);
                 displayFileGrid(currentFiles);
             } else {
@@ -410,6 +421,7 @@ function loadFileList(path, refresh = false) {
                 if (response.data.message && response.data.message.includes('storage not found')) {
                     console.log('Storage not found, treating as empty directory (new user)');
                     currentFiles = [];
+                    currentVideoCommonSubstrings = [];
                     displayFileList(currentFiles);
                     displayFileGrid(currentFiles);
                 } else {
@@ -444,12 +456,18 @@ function displayFileList(files) {
         const icon = file.is_dir ? 'bi-folder' : getFileIcon(file.name);
         const size = file.is_dir ? '' : formatBytes(file.size);
         
+        let displayName = file.name;
+        if (!file.is_dir && isVideoFile(file.name)) {
+            const nameResult = highlightFileName(file.name, currentVideoCommonSubstrings);
+            displayName = typeof nameResult === 'string' ? nameResult : nameResult.html;
+        }
+
         html += `
             <li class="list-group-item ${!file.is_dir && isVideoFile(file.name) ? 'video-item' : ''}">
                 <input type="checkbox" class="form-check-input me-2 file-checkbox" value="${file.name}" onchange="handleFileSelection()">
                 <div class="flex-grow-1" onclick="handleFileClick('${file.name}', ${file.is_dir}, event)">
                     <i class="bi ${icon} me-2"></i>
-                    <span>${file.name}</span>
+                    <span title="${file.name}">${displayName}</span>
                 </div>
                 ${size ? `<span class="badge bg-secondary ms-auto">${size}</span>` : ''}
             </li>
@@ -590,6 +608,11 @@ function playVideo(fileName) {
 function showVideoPlayer(fileName, videoUrl) {
     isVideoPlaying = true;
     const contentArea = document.getElementById('contentArea');
+    
+    let displayName = fileName;
+    const nameResult = highlightFileName(fileName, currentVideoCommonSubstrings);
+    displayName = typeof nameResult === 'string' ? nameResult : nameResult.html;
+
     contentArea.innerHTML = `
         <div class="video-container">
              <button class="close-video-btn" onclick="closeVideoPlayer()">&times;</button>
@@ -598,7 +621,7 @@ function showVideoPlayer(fileName, videoUrl) {
                 您的浏览器不支持 video 标签。
             </video>
             <div class="video-info">
-                <h5>${fileName}</h5>
+                <h5 title="${fileName}">${displayName}</h5>
                 <p class="text-muted mb-0">播放路径: ${currentPath}</p>
             </div>
         </div>
@@ -882,16 +905,14 @@ function displayFileGrid(files) {
         return;
     }
     
-    // 获取所有视频文件名用于分析
-    const allVideoNames = videoFiles.map(file => file.name);
-    // 计算公共子串
-    const commonSubstrings = findCommonSubstrings(allVideoNames);
+    // 使用全局计算的公共子串
+    // const commonSubstrings = currentVideoCommonSubstrings;
     
     let html = '<div class="file-grid">';
     
     videoFiles.forEach(file => {
         // 使用 highlightFileName 函数处理文件名
-        const nameResult = highlightFileName(file.name, commonSubstrings);
+        const nameResult = highlightFileName(file.name, currentVideoCommonSubstrings);
         const displayHtml = typeof nameResult === 'string' ? nameResult : nameResult.html;
         const displayTitle = typeof nameResult === 'string' ? file.name : nameResult.title;
         
