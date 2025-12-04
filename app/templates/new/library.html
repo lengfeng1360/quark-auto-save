@@ -245,6 +245,45 @@
     .close-video-btn:hover {
         background-color: rgba(0, 0, 0, 0.8);
     }
+    .video-controls {
+        background-color: #161B22;
+        border: 1px solid #30363D;
+        border-radius: 8px;
+        padding: 12px;
+        margin-top: 10px;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 15px;
+        color: #C9D1D9;
+    }
+    .video-control-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .video-control-input {
+        background-color: #0D1117;
+        border: 1px solid #30363D;
+        color: #C9D1D9;
+        border-radius: 4px;
+        padding: 4px 8px;
+        width: 70px;
+    }
+    .video-control-input:focus {
+        border-color: #58A6FF;
+        outline: none;
+    }
+    .form-switch .form-check-input {
+        background-color: #30363D;
+        border-color: #30363D;
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%238B949E'/%3e%3c/svg%3e");
+    }
+    .form-switch .form-check-input:checked {
+        background-color: #1f6feb;
+        border-color: #1f6feb;
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23ffffff'/%3e%3c/svg%3e");
+    }
 </style>
 <div class="container-fluid">
     <div class="row">
@@ -302,6 +341,11 @@ let currentVideoCommonSubstrings = [];
 let isVideoPlaying = false;
 let libraryInitialized = false;
 let selectedFiles = new Set();
+let playerSettings = {
+    autoNext: false,
+    skipStart: 0,
+    skipEnd: 0
+};
 
 // 页面显示时初始化
 document.addEventListener('showPage', function(event) {
@@ -356,6 +400,7 @@ function initLibrary() {
     libraryInitialized = true;
     console.log('Initializing library...');
     // loadStorageInfo();
+    loadPlayerSettings(); // 加载播放器设置
     loadFileList(currentPath);
     
     // 事件监听
@@ -616,16 +661,108 @@ function showVideoPlayer(fileName, videoUrl) {
     contentArea.innerHTML = `
         <div class="video-container">
              <button class="close-video-btn" onclick="closeVideoPlayer()">&times;</button>
-            <video class="video-player" controls autoplay>
+            <video id="mainVideoPlayer" class="video-player" controls autoplay>
                 <source src="${videoUrl}" type="video/mp4">
                 您的浏览器不支持 video 标签。
             </video>
-            <div class="video-info">
+            
+            <div class="video-controls">
+                <div class="video-control-item form-switch">
+                    <input class="form-check-input" type="checkbox" id="autoNextSwitch" ${playerSettings.autoNext ? 'checked' : ''} onchange="updatePlayerSetting('autoNext', this.checked)">
+                    <label class="form-check-label" for="autoNextSwitch">自动下一集</label>
+                </div>
+                <div class="video-control-item ms-3">
+                    <label>跳过片头(秒):</label>
+                    <input type="number" class="video-control-input" value="${playerSettings.skipStart}" min="0" onchange="updatePlayerSetting('skipStart', this.value)">
+                </div>
+                <div class="video-control-item ms-3">
+                    <label>跳过片尾(秒):</label>
+                    <input type="number" class="video-control-input" value="${playerSettings.skipEnd}" min="0" onchange="updatePlayerSetting('skipEnd', this.value)">
+                </div>
+            </div>
+
+            <div class="video-info mt-3">
                 <h5 title="${fileName}">${displayName}</h5>
                 <p class="text-muted mb-0">播放路径: ${currentPath}</p>
             </div>
         </div>
     `;
+
+    setupVideoPlayerListeners(fileName);
+}
+
+function loadPlayerSettings() {
+    const saved = localStorage.getItem('quark_player_settings');
+    if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            playerSettings = { ...playerSettings, ...parsed };
+        } catch (e) {
+            console.error('Failed to parse player settings', e);
+        }
+    }
+}
+
+function updatePlayerSetting(key, value) {
+    if (key === 'skipStart' || key === 'skipEnd') {
+        value = parseInt(value) || 0;
+    }
+    playerSettings[key] = value;
+    localStorage.setItem('quark_player_settings', JSON.stringify(playerSettings));
+}
+
+function setupVideoPlayerListeners(currentFileName) {
+    const video = document.getElementById('mainVideoPlayer');
+    if (!video) return;
+
+    // 处理跳过片头
+    video.addEventListener('loadedmetadata', () => {
+        if (playerSettings.skipStart > 0) {
+            video.currentTime = playerSettings.skipStart;
+        }
+    });
+
+    // 处理跳过片尾和自动下一集
+    video.addEventListener('timeupdate', () => {
+        if (playerSettings.skipEnd > 0 && video.duration > 0) {
+            if (video.currentTime >= video.duration - playerSettings.skipEnd) {
+                // 如果启用了自动下一集，则直接触发结束逻辑
+                if (playerSettings.autoNext && !video.ended) {
+                     // 手动触发结束，或者直接调用播放下一集
+                     playNextVideo(currentFileName);
+                     // 移除监听器防止重复触发
+                     video.pause();
+                }
+            }
+        }
+    });
+
+    video.addEventListener('ended', () => {
+        if (playerSettings.autoNext) {
+            playNextVideo(currentFileName);
+        }
+    });
+}
+
+function playNextVideo(currentFileName) {
+    // 找到当前目录下的所有视频文件
+    const videoFiles = currentFiles.filter(file => !file.is_dir && isVideoFile(file.name));
+    
+    // 按名称排序（假设它们在 currentFiles 中已经是排序好的，或者重新排序以防万一）
+    // currentFiles 在 loadFileList 中已经排过序了，videoFiles 保持相对顺序
+    
+    const currentIndex = videoFiles.findIndex(f => f.name === currentFileName);
+    
+    if (currentIndex !== -1 && currentIndex < videoFiles.length - 1) {
+        const nextFile = videoFiles[currentIndex + 1];
+        console.log('Auto playing next video:', nextFile.name);
+        
+        // 显示一个短暂的提示或加载状态（可选，这里直接切）
+        playVideo(nextFile.name);
+    } else {
+        console.log('No next video found or last video reached.');
+        // 可选：退出全屏，或者显示播放结束
+    }
 }
 
 function closeVideoPlayer() {
