@@ -49,7 +49,17 @@
         margin-bottom: 2px;
         transition: background-color 0.2s;
         display: flex;
-        align-items: center;
+        align-items: flex-start;
+    }
+    .file-explorer .list-group-item .form-check-input {
+        margin-top: 0.3rem;
+        flex-shrink: 0;
+        width: 1.1em;
+        height: 1.1em;
+        min-width: 1.1em;
+    }
+    .file-explorer .list-group-item .badge {
+        margin-top: 0.2rem;
     }
     .file-explorer .list-group-item:hover {
         background-color: #21262D;
@@ -61,12 +71,16 @@
         color: #8B949E;
         width: 16px;
         text-align: center;
+        flex-shrink: 0;
     }
     .file-explorer .list-group-item.video-item {
         border-left: 3px solid transparent;
     }
     .file-explorer .list-group-item.video-item:hover {
         border-left-color: #0d6efd;
+    }
+    .file-info-container {
+        min-width: 0;
     }
     .storage-usage {
         margin-top: 20px;
@@ -526,9 +540,9 @@ function displayFileList(files) {
         html += `
             <li class="list-group-item ${!file.is_dir && isVideoFile(file.name) ? 'video-item' : ''}">
                 <input type="checkbox" class="form-check-input me-2 file-checkbox" value="${file.name}" onchange="handleFileSelection()">
-                <div class="flex-grow-1" onclick="handleFileClick('${file.name}', ${file.is_dir}, event)">
-                    <i class="bi ${icon} me-2"></i>
-                    <span title="${file.name}">${displayName}</span>
+                <div class="flex-grow-1 d-flex align-items-start file-info-container" onclick="handleFileClick('${file.name}', ${file.is_dir}, event)">
+                    <i class="bi ${icon} me-2 mt-1"></i>
+                    <span title="${file.name}" style="word-break: break-all;">${displayName}</span>
                 </div>
                 ${size ? `<span class="badge bg-secondary ms-auto">${size}</span>` : ''}
             </li>
