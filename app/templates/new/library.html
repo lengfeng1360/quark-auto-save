@@ -316,6 +316,14 @@
         border-radius: 8px;
         color: white;
     }
+    /* 提高 text-muted 在深色背景下的可读性 */
+    .library-sidebar .text-muted,
+    .library-content .text-muted {
+        color: #8B949E !important; /* 使用一个更亮的灰色 */
+    }
+    .video-info .text-muted {
+        color: #8B949E !important;
+    }
 </style>
 <div class="container-fluid">
     <div class="row">
@@ -366,6 +374,8 @@
     </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/dplayer/dist/DPlayer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js/dist/hls.min.js"></script>
 <script>
 let currentPath = '/';
 let currentFiles = [];
@@ -379,6 +389,7 @@ let playerSettings = {
     skipEnd: 0
 };
 let isRequestingVideo = false;
+let dp = null; // DPlayer instance
 
 // 页面显示时初始化
 document.addEventListener('showPage', function(event) {
@@ -541,9 +552,9 @@ function displayFileList(files) {
         }
 
         html += `
-            <li class="list-group-item ${!file.is_dir && isVideoFile(file.name) ? 'video-item' : ''}">
+            <li class="list-group-item ${!file.is_dir && isVideoFile(file.name) ? 'video-item' : ''}" onclick="handleFileClick('${file.name}', ${file.is_dir}, event)">
                 <input type="checkbox" class="form-check-input me-2 file-checkbox" value="${file.name}" onchange="handleFileSelection()">
-                <div class="flex-grow-1 d-flex align-items-start file-info-container" onclick="handleFileClick('${file.name}', ${file.is_dir}, event)">
+                <div class="flex-grow-1 d-flex align-items-start file-info-container">
                     <i class="bi ${icon} me-2 mt-1"></i>
                     <span title="${file.name}" style="word-break: break-all;">${displayName}</span>
                 </div>
@@ -662,117 +673,26 @@ function updateBreadcrumb(path) {
 }
 
 function playVideo(fileName) {
-    if (isRequestingVideo) return;
-    isRequestingVideo = true;
-
-    // 立即显示播放界面（加载状态）
-    showVideoPlayerLoading(fileName);
-
-    const filePath = currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`;
-    console.log('Playing video:', fileName, 'at path:', filePath);
-    
-    // 使用 POST 方法获取视频链接
-    axios.post('/api/library/fs/download', { path: filePath })
-        .then(response => {
-            console.log('Download response:', response);
-            if (response.data.success) {
-                const downloadUrl = response.data.data.download_url;
-                // 更新播放器源并开始播放
-                updateVideoPlayerSource(fileName, downloadUrl);
-            } else {
-                console.error('Failed to get video URL:', response.data);
-                // 在播放器界面显示错误
-                showVideoPlayerError('获取视频地址失败: ' + response.data.message);
-            }
-        })
-        .catch(error => {
-            console.error('Error getting video URL:', error);
-            showVideoPlayerError('网络请求失败: ' + error.message);
-        })
-        .finally(() => {
-            isRequestingVideo = false;
-        });
-}
-
-function showVideoPlayerLoading(fileName) {
     isVideoPlaying = true;
     const contentArea = document.getElementById('contentArea');
-    
+
+    // 构造显示名称
     let displayName = fileName;
     const nameResult = highlightFileName(fileName, currentVideoCommonSubstrings);
     displayName = typeof nameResult === 'string' ? nameResult : nameResult.html;
 
-    // 如果播放器已经存在，只更新信息和显示遮罩
-    const existingContainer = document.querySelector('.video-container');
-    if (existingContainer) {
-        // 更新标题
-        const titleEl = existingContainer.querySelector('.video-info h5');
-        if (titleEl) {
-            titleEl.title = fileName;
-            titleEl.innerHTML = displayName;
-        }
-        
-        // 确保遮罩存在
-        let overlay = existingContainer.querySelector('.video-loading-overlay');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.className = 'video-loading-overlay';
-            // 插入到 video 元素之前或之后，这里插入到 container 的开头，并覆盖在 video 上
-            // 但 video-player 有 margin-bottom，所以最好是覆盖在 video-player 的 wrapper 上
-            // 简单处理：插入到 container 中，通过 z-index 覆盖
-            // 为了定位准确，overlay 需要 absolute 定位，且 container 需要 relative (已设置)
-            // overlay 高度应该是 video 的高度
-            const videoEl = existingContainer.querySelector('.video-player');
-            if (videoEl) {
-                // 设置 overlay 大小位置匹配 video
-                // 由于 CSS 中 .video-loading-overlay 已经是 absolute top 0 left 0 width 100% height 100%
-                // 但 container 包含 info，我们只想覆盖 video 部分。
-                // 方案：把 video 包裹在一个 wrapper 里，或者动态设置 overlay 高度。
-                // 简单点：overlay 只覆盖 video 区域。
-                // CSS 中修改一下，或者这里动态设置 style
-                overlay.style.height = videoEl.offsetHeight + 'px'; // 临时对齐高度
-            }
-            existingContainer.insertBefore(overlay, existingContainer.firstChild);
-        }
-        
-        overlay.innerHTML = `
-            <div class="spinner-border text-primary mb-2" role="status" style="width: 3rem; height: 3rem;">
-                <span class="visually-hidden">加载中...</span>
-            </div>
-            <div>正在解析视频地址...</div>
-        `;
-        overlay.style.display = 'flex';
-        
-        // 暂停旧视频并替换元素以清除之前的事件监听器
-        const video = document.getElementById('mainVideoPlayer');
-        if (video) {
-            video.pause();
-            const newVideo = video.cloneNode(true);
-            newVideo.removeAttribute('src');
-            video.parentNode.replaceChild(newVideo, video);
-        }
-        return;
-    }
-
-    // 如果播放器不存在，创建新的结构
+    // 1. 先显示UI框架和加载状态
     contentArea.innerHTML = `
         <div class="video-container">
             <button class="close-video-btn" onclick="closeVideoPlayer()">&times;</button>
-            
-            <div class="video-wrapper" style="position: relative;">
+            <div id="dplayer" class="video-player">
                 <div class="video-loading-overlay">
-                    <div class="spinner-border text-primary mb-2" role="status" style="width: 3rem; height: 3rem;">
-                        <span class="visually-hidden">加载中...</span>
-                    </div>
-                    <div>正在解析视频地址...</div>
+                    <div class="spinner-border text-light" role="status"></div>
+                    <p class="mt-3">正在加载视频...</p>
                 </div>
-                <video id="mainVideoPlayer" class="video-player" controls autoplay>
-                    您的浏览器不支持 video 标签。
-                </video>
             </div>
-            
             <div class="video-controls">
-                <div class="video-control-item form-switch">
+               <div class="video-control-item form-switch">
                     <input class="form-check-input" type="checkbox" id="autoNextSwitch" ${playerSettings.autoNext ? 'checked' : ''} onchange="updatePlayerSetting('autoNext', this.checked)">
                     <label class="form-check-label" for="autoNextSwitch">自动下一集</label>
                 </div>
@@ -785,46 +705,88 @@ function showVideoPlayerLoading(fileName) {
                     <input type="number" class="video-control-input" value="${playerSettings.skipEnd}" min="0" onchange="updatePlayerSetting('skipEnd', this.value)">
                 </div>
             </div>
-
             <div class="video-info mt-3">
                 <h5 title="${fileName}">${displayName}</h5>
                 <p class="text-muted mb-0">播放路径: ${currentPath}</p>
             </div>
         </div>
     `;
-}
 
-function updateVideoPlayerSource(fileName, videoUrl) {
-    const video = document.getElementById('mainVideoPlayer');
-    const overlay = document.querySelector('.video-loading-overlay');
-    
-    if (video) {
-        video.src = videoUrl;
-        video.load();
-        video.play().catch(e => console.log('Autoplay prevented:', e));
+    // 2. 获取视频链接
+    const filePath = currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`;
+    axios.post('/api/library/fs/download', { path: filePath })
+        .then(response => {
+            if (response.data.success) {
+                const downloadUrl = response.data.data.download_url;
 
-        // 移除所有控件的焦点，将焦点设置到视频元素上
-        document.activeElement.blur();
+                // 3. 获取到链接后，再初始化播放器
+                dp = new DPlayer({
+                    container: document.getElementById('dplayer'),
+                    autoplay: true, // 设置为 true
+                    video: {
+                        url: downloadUrl, // 直接使用获取到的 URL
+                        type: 'auto'
+                    },
+                });
 
-        
-        // 重新绑定事件监听器 (因为 playNextVideo 可能会依赖新的文件名)
-        setupVideoPlayerListeners(fileName);
-    }
-    
-    if (overlay) {
-        overlay.style.display = 'none';
-    }
-}
+                // 监听播放结束事件以实现自动下一集
+                dp.on('ended', () => {
+                    if (playerSettings.autoNext) {
+                        playNextVideo(fileName);
+                    }
+                });
 
-function showVideoPlayerError(errorMessage) {
-    const overlay = document.querySelector('.video-loading-overlay');
-    if (overlay) {
-        overlay.innerHTML = `
-            <i class="bi bi-exclamation-circle text-danger mb-2" style="font-size: 3rem;"></i>
-            <div class="text-danger">${errorMessage}</div>
-            <button class="btn btn-sm btn-outline-light mt-3" onclick="closeVideoPlayer()">关闭</button>
-        `;
-    }
+                // 优化跳过片头：在视频准备好但未播放时跳转
+                let initialSeekPerformed = false;
+                dp.on('canplay', () => {
+                    if (!initialSeekPerformed && playerSettings.skipStart > 0) {
+                        initialSeekPerformed = true;
+                        dp.seek(playerSettings.skipStart);
+                    }
+                });
+
+                // 监听时间更新以实现跳过片尾
+                dp.on('timeupdate', () => {
+                    if (playerSettings.skipEnd > 0 && dp.video.duration > 0) {
+                        if (dp.video.currentTime >= dp.video.duration - playerSettings.skipEnd) {
+                            if (playerSettings.autoNext) {
+                                playNextVideo(fileName);
+                            }
+                        }
+                    }
+                });
+
+                // 监听时间更新以实现跳过片尾
+                dp.on('timeupdate', () => {
+                    if (playerSettings.skipEnd > 0 && dp.video.duration > 0) {
+                        if (dp.video.currentTime >= dp.video.duration - playerSettings.skipEnd) {
+                            if (playerSettings.autoNext) {
+                                playNextVideo(fileName);
+                            }
+                        }
+                    }
+                });
+
+                // 添加全屏变化事件监听
+                document.addEventListener('fullscreenchange', handleFullscreenChange);
+                document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+                document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+                document.addEventListener('msfullscreenchange', handleFullscreenChange);
+            } else {
+                // 如果获取链接失败，显示错误信息
+                const dplayerContainer = document.getElementById('dplayer');
+                if(dplayerContainer) {
+                    dplayerContainer.innerHTML = `<div class="video-loading-overlay" style="background-color: #000;">获取视频地址失败: ${response.data.message}</div>`;
+                }
+            }
+        })
+        .catch(error => {
+            // 网络错误
+             const dplayerContainer = document.getElementById('dplayer');
+             if(dplayerContainer) {
+                dplayerContainer.innerHTML = `<div class="video-loading-overlay" style="background-color: #000;">网络请求失败: ${error.message}</div>`;
+             }
+        });
 }
 
 function loadPlayerSettings() {
@@ -847,104 +809,6 @@ function updatePlayerSetting(key, value) {
     localStorage.setItem('quark_player_settings', JSON.stringify(playerSettings));
 }
 
-function setupVideoPlayerListeners(currentFileName) {
-    const video = document.getElementById('mainVideoPlayer');
-    if (!video) return;
-
-    // 新增：点击视频时移除焦点
-    video.addEventListener('click', () => {
-        video.blur();
-    });
-
-    // 处理跳过片头
-    video.addEventListener('loadedmetadata', () => {
-        if (playerSettings.skipStart > 0) {
-            video.currentTime = playerSettings.skipStart;
-        }
-    });
-
-    // 处理跳过片尾和自动下一集
-    video.addEventListener('timeupdate', () => {
-        if (playerSettings.skipEnd > 0 && video.duration > 0) {
-            if (video.currentTime >= video.duration - playerSettings.skipEnd) {
-                // 如果启用了自动下一集，则直接触发结束逻辑
-                if (playerSettings.autoNext && !video.ended) {
-                     // 手动触发结束，或者直接调用播放下一集
-                     playNextVideo(currentFileName);
-                     // 移除监听器防止重复触发
-                     video.pause();
-                }
-            }
-        }
-    });
-
-    video.addEventListener('ended', () => {
-        if (playerSettings.autoNext) {
-            playNextVideo(currentFileName);
-        }
-    });
-
-    // 添加全屏变化事件监听
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
-    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
-}
-
-// 处理全屏变化事件
-function handleFullscreenChange() {
-    const videoContainer = document.querySelector('.video-container');
-    if (!videoContainer) return;
-
-    if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement) {
-        // 进入全屏
-        videoContainer.classList.add('is-fullscreen');
-        document.activeElement.blur();
-    } else {
-        // 退出全屏
-        videoContainer.classList.remove('is-fullscreen');
-    }
-}
-
-// 全局键盘事件监听
-document.addEventListener('keydown', function(event) {
-    if (!isVideoPlaying) return;
-    
-    const video = document.getElementById('mainVideoPlayer');
-    if (!video) return;
-
-    // 避免在输入框中打字时触发快捷键
-    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-        return;
-    }
-
-    switch(event.code) {
-        case 'Space':
-            event.preventDefault(); // 防止页面滚动
-            if (video.paused) {
-                video.play();
-            } else {
-                video.pause();
-            }
-            break;
-        case 'ArrowLeft':
-            event.preventDefault();
-            video.currentTime = Math.max(0, video.currentTime - 10);
-            break;
-        case 'ArrowRight':
-            event.preventDefault();
-            video.currentTime = Math.min(video.duration, video.currentTime + 10);
-            break;
-        case 'ArrowUp':
-            event.preventDefault();
-            video.volume = Math.min(1, video.volume + 0.1);
-            break;
-        case 'ArrowDown':
-            event.preventDefault();
-            video.volume = Math.max(0, video.volume - 0.1);
-            break;
-    }
-});
 
 function playNextVideo(currentFileName) {
     // 找到当前目录下的所有视频文件
@@ -969,8 +833,27 @@ function playNextVideo(currentFileName) {
 
 function closeVideoPlayer() {
     isVideoPlaying = false;
+    // 移除全屏事件监听器，防止内存泄漏
+    document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.removeEventListener('msfullscreenchange', handleFullscreenChange);
     // 重新显示文件网格
     displayFileGrid(currentFiles);
+}
+
+// 处理全屏变化事件
+function handleFullscreenChange() {
+    const videoContainer = document.querySelector('.video-container');
+    if (!videoContainer) return;
+
+    if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement) {
+        // 进入全屏
+        videoContainer.classList.add('is-fullscreen');
+    } else {
+        // 退出全屏
+        videoContainer.classList.remove('is-fullscreen');
+    }
 }
 
 function getFileIcon(fileName) {
