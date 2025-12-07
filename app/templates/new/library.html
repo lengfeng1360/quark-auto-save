@@ -389,6 +389,7 @@ let playerSettings = {
     skipEnd: 0
 };
 let isRequestingVideo = false;
+let currentPlayFile = null;
 let dp = null; // DPlayer instance
 
 // 页面显示时初始化
@@ -674,8 +675,18 @@ function updateBreadcrumb(path) {
     breadcrumb.innerHTML = html;
 }
 
+function _createProxyUrl(originalUrl) {
+    // 【修改这里】使用您刚刚部署的 Deno Deploy 地址
+    return `https://quarkurlproxy.deno.dev?url=${encodeURIComponent(originalUrl)}`;
+}
+
+
+
 function playVideo(fileName) {
+
+    trydestroydp(dp)
     isVideoPlaying = true;
+    isRequestingVideo = true; // 设置请求标志
     const contentArea = document.getElementById('contentArea');
 
     // 构造显示名称
@@ -719,9 +730,18 @@ function playVideo(fileName) {
     axios.post('/api/library/fs/download', { path: filePath })
         .then(response => {
             if (response.data.success) {
+
+                if(fileName === currentPlayFile){
+                    return;
+                }
+                currentPlayFile = fileName;
+                
                 const downloadUrl = response.data.data.download_url;
                 let isM3U8 = downloadUrl.includes('.m3u8');
-
+                // if(isM3U8){
+                //     downloadUrl = _createProxyUrl(downloadUrl)
+                // }
+                // downloadUrl = _createProxyUrl(downloadUrl)
                 // --- 核心：主动显示回退UI的函数 ---
                 const showFallbackUI = () => {
                     console.log('HLS error detected, showing fallback UI.');
@@ -733,7 +753,7 @@ function playVideo(fileName) {
                                 <h5>视频加载失败</h5>
                                 <p class="text-muted mb-4">这可能是由CORS策略或网络问题引起的。您可以尝试在新标签页中打开它。</p>
                                 <a href="${downloadUrl}" target="_blank" class="btn btn-primary">
-                                    <i class="bi bi-box-arrow-up-right me-2"></i>在新标签页中打开
+                                    <i class="bi bi-box-arrow-up-right me-2"></i>点击尝试在新标签页中打开播放
                                 </a>
                             </div>
                         `;
@@ -744,13 +764,14 @@ function playVideo(fileName) {
                 dp = new DPlayer({
                     container: document.getElementById('dplayer'),
                     autoplay: true, // 设置为 true
+                    // preload: 'auto',  // 让浏览器尽可能多加载
                     video: {
                         url: downloadUrl, // 直接使用获取到的 URL
-                        type: 'auto'
-                    },
+                        type: 'auto',
+                        referrerPolicy: 'no-referrer'
+                    }
                 });
-
-                                // --- 核心：监听 hls.js 的错误事件 ---
+                // --- 核心：监听 hls.js 的错误事件 ---
                 // 只有当 DPlayer 确实使用了 hls.js 时，dp.plugins.hls 才存在
                 if (isM3U8 && dp.plugins.hls) {
                     dp.plugins.hls.on(Hls.Events.ERROR, function (event, data) {
@@ -821,8 +842,15 @@ function playVideo(fileName) {
              if(dplayerContainer) {
                 dplayerContainer.innerHTML = `<div class="video-loading-overlay" style="background-color: #000;">网络请求失败: ${error.message}</div>`;
              }
+        })
+        .finally(() => {
+            // 无论成功还是失败，都会执行这里
+            isRequestingVideo = false;
         });
+
 }
+
+
 
 function loadPlayerSettings() {
     const saved = localStorage.getItem('quark_player_settings');
@@ -866,13 +894,63 @@ function playNextVideo(currentFileName) {
     }
 }
 
+
+function trydestroydp(_dp) {
+    if (!_dp) {
+        console.log('DPlayer instance does not exist or is already destroyed.');
+        return;
+    }
+    
+    console.log('DPlayer  destroyting....');
+
+    // 1. 立即保存实例并清空全局引用，实现隔离
+    const playerToDestroy = _dp;
+ 
+
+    try {
+        //增加空回调,避免出现错误信息
+        playerToDestroy.on('error', null);
+
+        // 2. 对隔离出来的实例执行清理操作
+        playerToDestroy.pause();
+        // playerToDestroy.src('');
+        // playerToDestroy.poster('');
+
+        // 3. 销毁实例
+        playerToDestroy.destroy();
+
+    } catch (e) {
+        console.error('An error occurred during DPlayer destruction:', e);
+    } finally {
+        console.log('DPlayer instance has been destroyed and reference cleared.');
+    }
+    
+}
+
 function closeVideoPlayer() {
     isVideoPlaying = false;
-    // 移除全屏事件监听器，防止内存泄漏
+    currentPlayFile = null;
+    // 销毁DPlayer实例以释放视频资源
+    trydestroydp(dp)
+    
+    // 如果有正在进行的视频请求，取消它
+    if (isRequestingVideo) {
+        isRequestingVideo = false;
+        // 这里可以添加取消请求的代码，如果使用的是axios，可以使用CancelToken
+    }
+    
+    // 移除全屏事件监听器
     document.removeEventListener('fullscreenchange', handleFullscreenChange);
     document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
     document.removeEventListener('msfullscreenchange', handleFullscreenChange);
+    
+    // 清理其他可能的资源
+    const dplayerContainer = document.getElementById('dplayer');
+    if (dplayerContainer) {
+        dplayerContainer.innerHTML = ''; // 清空容器内容
+    }
+    
     // 重新显示文件网格
     displayFileGrid(currentFiles);
 }
