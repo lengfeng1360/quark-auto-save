@@ -506,8 +506,10 @@ function loadFileList(path, refresh = false) {
                 displayFileList(currentFiles);
                 displayFileGrid(currentFiles);
             } else {
+                    
+
                 // 特殊处理：如果后端返回 storage not found，视为新用户空目录，不报错
-                if (response.data.message && response.data.message.includes('storage not found')) {
+                if (response.data.message && response.data.message.includes('object not found') && "/" === path.trim()) {
                     console.log('Storage not found, treating as empty directory (new user)');
                     currentFiles = [];
                     currentVideoCommonSubstrings = [];

@@ -141,6 +141,7 @@
 </div>
 
 <script>
+// import { loadAndStoreConfig } from './configmanager.js'; // 复用之前定义的函数
 document.addEventListener('DOMContentLoaded', function() {
     // This function will be called when the transfer page is shown
     const populateShareUrl = () => {
@@ -182,6 +183,16 @@ document.addEventListener('DOMContentLoaded', function() {
             .catch(error => console.error("加载配置失败:", error));
     };
     loadDefaultSavePath();
+    
+    // loadAndStoreConfig((config) => {
+    //     if (config) {
+    //         const defaultPath = config.save_path_default;
+    //         const savePathInput = document.getElementById('savePathInput');
+    //         if(typeof defaultPath === 'string' && savePathInput) {
+    //             savePathInput.value = defaultPath;
+    //         }
+    //     }
+    // });
 
     const analyzeButton = document.getElementById('analyzeButton');
     const shareLinkTextarea = document.getElementById('shareLink');
