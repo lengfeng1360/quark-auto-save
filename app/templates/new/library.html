@@ -718,6 +718,25 @@ function playVideo(fileName) {
         .then(response => {
             if (response.data.success) {
                 const downloadUrl = response.data.data.download_url;
+                let isM3U8 = downloadUrl.includes('.m3u8');
+
+                // --- 核心：主动显示回退UI的函数 ---
+                const showFallbackUI = () => {
+                    console.log('HLS error detected, showing fallback UI.');
+                    const dplayerContainer = document.getElementById('dplayer');
+                    if (dplayerContainer) {
+                        dplayerContainer.innerHTML = `
+                            <div class="video-loading-overlay" style="background-color: #000; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 20px;">
+                                <i class="bi bi-exclamation-triangle mb-3" style="font-size: 3rem; color: #f85149;"></i>
+                                <h5>视频加载失败</h5>
+                                <p class="text-muted mb-4">这可能是由CORS策略或网络问题引起的。您可以尝试在新标签页中打开它。</p>
+                                <a href="${downloadUrl}" target="_blank" class="btn btn-primary">
+                                    <i class="bi bi-box-arrow-up-right me-2"></i>在新标签页中打开
+                                </a>
+                            </div>
+                        `;
+                    }
+                };
 
                 // 3. 获取到链接后，再初始化播放器
                 dp = new DPlayer({
@@ -728,6 +747,22 @@ function playVideo(fileName) {
                         type: 'auto'
                     },
                 });
+
+                                // --- 核心：监听 hls.js 的错误事件 ---
+                // 只有当 DPlayer 确实使用了 hls.js 时，dp.plugins.hls 才存在
+                if (isM3U8 && dp.plugins.hls) {
+                    dp.plugins.hls.on(Hls.Events.ERROR, function (event, data) {
+                        console.error('HLS.js error detected:', data);
+                        // data.type: 错误类型，例如 'networkError'
+                        // data.details: 错误详情，例如 'manifestLoadError'
+                        // data.fatal: 是否是致命错误
+
+                        // 如果是致命的网络错误，就显示回退UI
+                        if (data.fatal && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            showFallbackUI();
+                        }
+                    });
+                }
 
                 // 监听播放结束事件以实现自动下一集
                 dp.on('ended', () => {
