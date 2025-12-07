@@ -757,13 +757,11 @@ function playVideo(fileName) {
                 });
 
                 // 监听时间更新以实现跳过片尾
-                dp.on('timeupdate', () => {
-                    if (playerSettings.skipEnd > 0 && dp.video.duration > 0) {
-                        if (dp.video.currentTime >= dp.video.duration - playerSettings.skipEnd) {
-                            if (playerSettings.autoNext) {
-                                playNextVideo(fileName);
-                            }
-                        }
+                dp.on('error', (error) => {
+                    console.error('DPlayer error:', error);
+                    const dplayerContainer = document.getElementById('dplayer');
+                    if(dplayerContainer) {
+                        dplayerContainer.innerHTML = `<div class="video-loading-overlay" style="background-color: #000;">播放错误: ${error.message || '未知错误'}</div>`;
                     }
                 });
 
