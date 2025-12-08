@@ -392,6 +392,10 @@ let isRequestingVideo = false;
 let currentPlayFile = null;
 let dp = null; // DPlayer instance
 
+// 单一播放会话控制：用于避免并发请求和多实例占用资源
+let playSessionId = 0;
+let currentPlaySession = null; // { id, fileName, path, state, cancelSource }
+
 // 页面显示时初始化
 document.addEventListener('showPage', function(event) {
     if (event.detail.pageId === 'library') {
@@ -680,13 +684,45 @@ function _createProxyUrl(originalUrl) {
     return `https://quarkurlproxy.deno.dev?url=${encodeURIComponent(originalUrl)}`;
 }
 
+// 取消当前会话的下载请求（如果存在）
+function cancelCurrentVideoRequest(reason) {
+    if (currentPlaySession && currentPlaySession.cancelSource && typeof currentPlaySession.cancelSource.cancel === 'function') {
+        try {
+            currentPlaySession.cancelSource.cancel(reason || 'Canceled by new action');
+        } catch (e) {
+            console.error('Failed to cancel previous video request:', e);
+        } finally {
+            currentPlaySession.cancelSource = null;
+        }
+    }
+}
+
+// 销毁当前 DPlayer 实例并清理全局引用
+function destroyCurrentPlayer() {
+    if (dp) {
+        trydestroydp(dp);
+        dp = null;
+    }
+}
+
 
 
 function playVideo(fileName) {
 
-    trydestroydp(dp)
+    // 为新的播放会话生成 id，并终止上一个会话
+    playSessionId += 1;
+    const sessionId = playSessionId;
+
+    // 确保上一个会话的请求和播放器被清理，避免并发和资源占用
+    cancelCurrentVideoRequest('Start new video session');
+    // 立即将旧会话标记为失效，避免其异步事件影响新会话 UI
+    currentPlaySession = null;
+    destroyCurrentPlayer();
+
     isVideoPlaying = true;
-    isRequestingVideo = true; // 设置请求标志
+    isRequestingVideo = true; // 设置请求标志，用于 UI 状态
+    currentPlayFile = fileName;
+
     const contentArea = document.getElementById('contentArea');
 
     // 构造显示名称
@@ -727,21 +763,38 @@ function playVideo(fileName) {
 
     // 2. 获取视频链接
     const filePath = currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`;
-    axios.post('/api/library/fs/download', { path: filePath })
-        .then(response => {
-            if (response.data.success) {
 
-                if(fileName === currentPlayFile){
-                    return;
-                }
-                currentPlayFile = fileName;
-                
+    // 初始化当前会话对象
+    currentPlaySession = {
+        id: sessionId,
+        fileName: fileName,
+        path: filePath,
+        state: 'RequestingUrl',
+        cancelSource: null
+    };
+
+    let axiosConfig = undefined;
+
+    // 使用 axios.CancelToken（如果可用）支持取消请求
+    if (typeof axios !== 'undefined' && axios.CancelToken) {
+        const cancelSource = axios.CancelToken.source();
+        currentPlaySession.cancelSource = cancelSource;
+        axiosConfig = { cancelToken: cancelSource.token };
+    }
+
+    axios.post('/api/library/fs/download', { path: filePath }, axiosConfig)
+        .then(response => {
+            // 如果会话已失效或被新的点击替代，直接忽略结果
+            if (!currentPlaySession || currentPlaySession.id !== sessionId) {
+                return;
+            }
+
+            if (response.data.success) {
                 const downloadUrl = response.data.data.download_url;
-                let isM3U8 = downloadUrl.includes('.m3u8');
-                // if(isM3U8){
-                //     downloadUrl = _createProxyUrl(downloadUrl)
-                // }
-                // downloadUrl = _createProxyUrl(downloadUrl)
+                const isM3U8 = downloadUrl.includes('.m3u8');
+
+                currentPlaySession.state = 'InitializingPlayer';
+
                 // --- 核心：主动显示回退UI的函数 ---
                 const showFallbackUI = () => {
                     console.log('HLS error detected, showing fallback UI.');
@@ -760,9 +813,15 @@ function playVideo(fileName) {
                     }
                 };
 
+                const dplayerContainer = document.getElementById('dplayer');
+                if (!dplayerContainer) {
+                    // UI 已经被关闭或切换，不再初始化播放器
+                    return;
+                }
+
                 // 3. 获取到链接后，再初始化播放器
                 dp = new DPlayer({
-                    container: document.getElementById('dplayer'),
+                    container: dplayerContainer,
                     autoplay: true, // 设置为 true
                     // preload: 'auto',  // 让浏览器尽可能多加载
                     video: {
@@ -771,14 +830,14 @@ function playVideo(fileName) {
                         referrerPolicy: 'no-referrer'
                     }
                 });
+
+                currentPlaySession.state = 'Playing';
+
                 // --- 核心：监听 hls.js 的错误事件 ---
                 // 只有当 DPlayer 确实使用了 hls.js 时，dp.plugins.hls 才存在
-                if (isM3U8 && dp.plugins.hls) {
+                if (isM3U8 && dp.plugins && dp.plugins.hls) {
                     dp.plugins.hls.on(Hls.Events.ERROR, function (event, data) {
                         console.error('HLS.js error detected:', data);
-                        // data.type: 错误类型，例如 'networkError'
-                        // data.details: 错误详情，例如 'manifestLoadError'
-                        // data.fatal: 是否是致命错误
 
                         // 如果是致命的网络错误，就显示回退UI
                         if (data.fatal && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
@@ -787,24 +846,33 @@ function playVideo(fileName) {
                     });
                 }
 
-                // 监听播放结束事件以实现自动下一集
+                // 监听播放结束事件以实现自动下一集（仅对当前会话生效）
                 dp.on('ended', () => {
+                    if (!currentPlaySession || currentPlaySession.id !== sessionId) {
+                        return;
+                    }
                     if (playerSettings.autoNext) {
                         playNextVideo(fileName);
                     }
                 });
 
-                // 优化跳过片头：在视频准备好但未播放时跳转
+                // 优化跳过片头：在视频准备好但未播放时跳转（仅对当前会话生效）
                 let initialSeekPerformed = false;
                 dp.on('canplay', () => {
+                    if (!currentPlaySession || currentPlaySession.id !== sessionId) {
+                        return;
+                    }
                     if (!initialSeekPerformed && playerSettings.skipStart > 0) {
                         initialSeekPerformed = true;
                         dp.seek(playerSettings.skipStart);
                     }
                 });
 
-                // 监听时间更新以实现跳过片尾
+                // 监听时间更新以实现跳过片尾（仅对当前会话生效）
                 dp.on('timeupdate', () => {
+                    if (!currentPlaySession || currentPlaySession.id !== sessionId) {
+                        return;
+                    }
                     if (playerSettings.skipEnd > 0 && dp.video.duration > 0) {
                         if (dp.video.currentTime >= dp.video.duration - playerSettings.skipEnd) {
                             if (playerSettings.autoNext) {
@@ -814,12 +882,15 @@ function playVideo(fileName) {
                     }
                 });
 
-                // 监听时间更新以实现跳过片尾
+                // 播放器错误处理（仅对当前会话生效，避免旧实例销毁时短暂覆盖 UI）
                 dp.on('error', (error) => {
+                    if (!currentPlaySession || currentPlaySession.id !== sessionId) {
+                        return;
+                    }
                     console.error('DPlayer error:', error);
-                    const dplayerContainer = document.getElementById('dplayer');
-                    if(dplayerContainer) {
-                        dplayerContainer.innerHTML = `<div class="video-loading-overlay" style="background-color: #000;">播放错误: ${error.message || '未知错误'}</div>`;
+                    const dplayerContainerInner = document.getElementById('dplayer');
+                    if (dplayerContainerInner) {
+                        dplayerContainerInner.innerHTML = `<div class="video-loading-overlay" style="background-color: #000;">播放错误: ${error.message || '未知错误'}</div>`;
                     }
                 });
 
@@ -830,21 +901,36 @@ function playVideo(fileName) {
                 document.addEventListener('msfullscreenchange', handleFullscreenChange);
             } else {
                 // 如果获取链接失败，显示错误信息
+                currentPlaySession.state = 'FallbackError';
                 const dplayerContainer = document.getElementById('dplayer');
-                if(dplayerContainer) {
+                if (dplayerContainer) {
                     dplayerContainer.innerHTML = `<div class="video-loading-overlay" style="background-color: #000;">获取视频地址失败: ${response.data.message}</div>`;
                 }
             }
         })
         .catch(error => {
+            // 如果会话已失效或被新的点击替代，忽略错误
+            if (!currentPlaySession || currentPlaySession.id !== sessionId) {
+                return;
+            }
+
+            // 主动取消请求的场景，静默处理
+            if (typeof axios !== 'undefined' && axios.isCancel && axios.isCancel(error)) {
+                console.log('Video request canceled for session', sessionId, error.message || '');
+                return;
+            }
+
             // 网络错误
-             const dplayerContainer = document.getElementById('dplayer');
-             if(dplayerContainer) {
+            const dplayerContainer = document.getElementById('dplayer');
+            if (dplayerContainer) {
                 dplayerContainer.innerHTML = `<div class="video-loading-overlay" style="background-color: #000;">网络请求失败: ${error.message}</div>`;
-             }
+            }
         })
         .finally(() => {
-            // 无论成功还是失败，都会执行这里
+            // 只在当前会话仍然有效时更新状态
+            if (!currentPlaySession || currentPlaySession.id !== sessionId) {
+                return;
+            }
             isRequestingVideo = false;
         });
 
@@ -928,29 +1014,32 @@ function trydestroydp(_dp) {
 }
 
 function closeVideoPlayer() {
+    // 标记为非播放状态，允许恢复文件网格渲染
     isVideoPlaying = false;
     currentPlayFile = null;
-    // 销毁DPlayer实例以释放视频资源
-    trydestroydp(dp)
-    
+
     // 如果有正在进行的视频请求，取消它
-    if (isRequestingVideo) {
-        isRequestingVideo = false;
-        // 这里可以添加取消请求的代码，如果使用的是axios，可以使用CancelToken
-    }
-    
+    cancelCurrentVideoRequest('User closed player');
+    isRequestingVideo = false;
+
+    // 销毁DPlayer实例以释放视频资源
+    destroyCurrentPlayer();
+
     // 移除全屏事件监听器
     document.removeEventListener('fullscreenchange', handleFullscreenChange);
     document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
     document.removeEventListener('msfullscreenchange', handleFullscreenChange);
-    
+
+    // 使当前会话失效
+    currentPlaySession = null;
+
     // 清理其他可能的资源
     const dplayerContainer = document.getElementById('dplayer');
     if (dplayerContainer) {
         dplayerContainer.innerHTML = ''; // 清空容器内容
     }
-    
+
     // 重新显示文件网格
     displayFileGrid(currentFiles);
 }
