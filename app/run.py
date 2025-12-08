@@ -1363,6 +1363,10 @@ if __name__ == "__main__":
     init()
     reload_tasks()
     logging.info(">>> 启动Web服务")
+    # 打印明显的版本号日志，方便在 Docker logs 中查看
+    logging.info("========================================")
+    logging.info(f"   Current Version: {app.config['APP_VERSION']}")
+    logging.info("========================================")
     logging.info(f"运行在: http://{HOST}:{PORT}")
     app.run(
         debug=DEBUG,
