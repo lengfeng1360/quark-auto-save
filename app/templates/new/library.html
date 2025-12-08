@@ -826,7 +826,7 @@ function playVideo(fileName) {
                     // preload: 'auto',  // 让浏览器尽可能多加载
                     video: {
                         url: downloadUrl, // 直接使用获取到的 URL
-                        type: 'auto',
+                        type: isM3U8?'auto':'normal',
                         referrerPolicy: 'no-referrer'
                     }
                 });
