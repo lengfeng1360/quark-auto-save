@@ -123,6 +123,17 @@ def reset_alist_client():
     global _alist_instance
     _alist_instance = None
 
+def get_quark_client():
+    """
+    统一获取 Quark 客户端实例。
+    如果 Cookie 未配置，返回 None。
+    """
+    cookies = config_data.get("cookie")
+    if not cookies or not isinstance(cookies, list) or not cookies[0]:
+        return None
+    # Quark 类的初始化开销很小（主要是字符串解析），直接每次实例化即可，保证线程安全
+    return Quark(cookies[0])
+
 # 过滤werkzeug日志输出
 if not DEBUG:
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
@@ -317,6 +328,7 @@ def get_admin_data():
     data["api_token"] = get_login_token()
     data["task_plugins_config_default"] = task_plugins_config_default
     return jsonify({"success": True, "data": data})
+
 @app.route("/api/public_config")
 def get_public_config():
     if not is_login():
@@ -512,7 +524,10 @@ def get_share_detail():
     stoken = request.json.get("stoken", "")
     pdir_fid = request.json.get("pdir_fid", 0)
     pwd_id = request.json.get("pwd_id", "")
+    
+    # 这里使用无Cookie初始化，仅用于解析链接
     account = Quark()
+    
     if shareurl:
         pwd_id, passcode, pdir_fid, paths = account.extract_url(shareurl)
     else:
@@ -548,11 +563,18 @@ def get_share_detail():
         magic_regex = request.json.get("magic_regex", {})
         mr = MagicRename(magic_regex)
         mr.set_taskname(task.get("taskname", ""))
-        account = Quark(config_data["cookie"][0])
-        get_fids = account.get_fids([task.get("savepath", "")])
-        if get_fids:
-            dir_file_list = account.ls_dir(get_fids[0]["fid"])["data"]["list"]
-            dir_filename_list = [dir_file["file_name"] for dir_file in dir_file_list]
+        
+        # 优化点：使用 helper 获取带Cookie的实例
+        account = get_quark_client()
+        
+        if account:
+            get_fids = account.get_fids([task.get("savepath", "")])
+            if get_fids:
+                dir_file_list = account.ls_dir(get_fids[0]["fid"])["data"]["list"]
+                dir_filename_list = [dir_file["file_name"] for dir_file in dir_file_list]
+            else:
+                dir_file_list = []
+                dir_filename_list = []
         else:
             dir_file_list = []
             dir_filename_list = []
@@ -597,7 +619,12 @@ def get_share_detail():
 def get_savepath_detail():
     if not is_login():
         return jsonify({"success": False, "message": "未登录"})
-    account = Quark(config_data["cookie"][0])
+    
+    # 优化点：使用 helper
+    account = get_quark_client()
+    if not account:
+        return jsonify({"success": False, "data": {"error": "未配置Cookie"}})
+        
     paths = []
     if path := request.args.get("path"):
         path = re.sub(r"/+", "/", path)
@@ -633,12 +660,18 @@ def get_savepath_detail():
 def delete_file():
     if not is_login():
         return jsonify({"success": False, "message": "未登录"})
-    account = Quark(config_data["cookie"][0])
+    
+    # 优化点：使用 helper
+    account = get_quark_client()
+    if not account:
+        return jsonify({"success": False, "message": "未配置Cookie"})
+
     if fid := request.json.get("fid"):
         response = account.delete([fid])
     else:
         response = {"success": False, "message": "缺失必要字段: fid"}
     return jsonify(response)
+    
 def _get_user_path(path, isAlistpath=False):
     """
     根据用户角色和 Alist 插件配置调整路径 (优化版)。
@@ -724,9 +757,6 @@ def ensure_directory_exists(account, dir_path, created_dirs):
             continue
 
         # 如果不存在，则创建它
-        # 注意：根据你的Quark类，mkdir可能需要pdir_fid参数
-        # 但你提供的mkdir方法签名是 mkdir(self, dir_path)，它似乎是处理完整路径的
-        # 如果是这样，我们直接传入current_path即可
         mkdir_res = account.mkdir(current_path)
         
         if mkdir_res and mkdir_res.get("code") == 0:
@@ -758,7 +788,10 @@ def transfer_files_with_structure():
     save_path = re.sub(r"/{2,}", "/", f"/{save_path}")
     logging.info(f"save_path: {save_path}")
 
-    account = Quark(config_data["cookie"][0])
+    # 优化点：使用 helper
+    account = get_quark_client()
+    if not account:
+        return jsonify({"success": False, "message": "未配置Cookie"})
 
     # --- 步骤 1: 获取基础保存路径 save_path 的真实 fid ---
     save_path_fid = "0"
@@ -861,7 +894,10 @@ def transfer_files():
     if len(fids) != len(fid_tokens):
         return jsonify({"success": False, "message": "Mismatch between fids and fid_tokens count"})
 
-    account = Quark(config_data["cookie"][0])
+    # 优化点：使用 helper
+    account = get_quark_client()
+    if not account:
+        return jsonify({"success": False, "message": "未配置Cookie"})
     
     # 1. 获取或创建保存路径 ID
     save_path = re.sub(r"/{2,}", "/", f"/{save_path}")
@@ -960,6 +996,7 @@ def get_storage_info():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)})
 
+#alist 获取文件列表
 @app.route("/api/library/fs/list", methods=["POST"])
 def get_fs_list():
     if not is_login():
@@ -999,6 +1036,96 @@ def get_fs_list():
         
         return jsonify({"success": False, "message": result.get("message", "获取文件列表失败")})
     except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
+
+@app.route("/api/library/fs/list", methods=["POST"])
+def get_fs_qklist():
+    if not is_login():
+        return jsonify({"success": False, "message": "未登录"})
+    
+    try:
+        # 1. 检查并初始化 Quark 实例
+        account = get_quark_client()
+        if not account:
+            return jsonify({"success": False, "message": "夸克 Cookie 未配置"})
+
+        data = request.json
+        raw_path = data.get("path", "/")
+        
+        # 2. 获取真实路径
+        # 注意：这里 isAlistpath 设为 False，因为我们直接操作夸克网盘，不需要 Alist 的挂载前缀
+        path = _get_user_path(raw_path, isAlistpath=False)
+        logging.info(f"Listing Quark path: {path}")
+
+        # 3. 将路径转换为 fid (File ID)
+        target_fid = "0" # 默认为根目录
+        if path != "/":
+            # get_fids 返回 [{'fid': 'xxx', 'file_path': 'xxx'}]
+            fids_res = account.get_fids([path])
+            if fids_res:
+                target_fid = fids_res[0]["fid"]
+            else:
+                # 路径不存在，返回空列表，模仿 Alist 行为
+                return jsonify({
+                    "success": True, 
+                    "data": {
+                        "content": [],
+                        "total": 0,
+                        "readme": "",
+                        "write": True,
+                        "provider": "QuarkDirect"
+                    }
+                })
+
+        # 4. 获取文件列表
+        # ls_dir 内部已经处理了翻页逻辑，会返回该目录下所有文件
+        ls_res = account.ls_dir(target_fid)
+        
+        if ls_res.get("code") != 0:
+            return jsonify({"success": False, "message": ls_res.get("message", "获取文件列表失败")})
+        
+        quark_files = ls_res.get("data", {}).get("list", [])
+        
+        # 5. 格式化数据以适配前端 (模拟 Alist 格式)
+        content = []
+        for item in quark_files:
+            # 转换时间戳
+            mod_time = ""
+            if item.get("updated_at"):
+                try:
+                    # 夸克通常返回毫秒级时间戳
+                    mod_time = datetime.fromtimestamp(item["updated_at"] / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                except:
+                    pass
+
+            entry = {
+                "name": item["file_name"],
+                "size": item["size"],
+                "is_dir": item["dir"],
+                "modified": mod_time,
+                "created": mod_time,
+                "sign": "", 
+                "thumb": item.get("thumbnail_url", ""), # 夸克有的接口会返回缩略图
+                "type": 1 if item["dir"] else 0,
+                "raw_fid": item["fid"] 
+            }
+            content.append(entry)
+
+        # 返回结构需符合前端预期
+        return jsonify({
+            "success": True, 
+            "data": {
+                "content": content,
+                "total": len(content),
+                "readme": "",
+                "write": True,
+                "provider": "QuarkDirect"
+            }
+        })
+
+    except Exception as e:
+        logging.error(f"List FS error: {str(e)}")
+        logging.error(traceback.format_exc())
         return jsonify({"success": False, "message": str(e)})
 
 @app.route("/api/library/fs/get", methods=["POST"])
@@ -1103,9 +1230,10 @@ def delete_fs_items():
     
     try:
         # 1. 检查配置并初始化 Quark
-        if not config_data.get("cookie") or not config_data["cookie"][0]:
+        # 优化点：使用 helper
+        account = get_quark_client()
+        if not account:
             return jsonify({"success": False, "message": "夸克 Cookie 未配置，无法执行删除操作"})
-        account = Quark(config_data["cookie"][0])
 
         data = request.json
         paths_to_delete = data.get("paths", [])
