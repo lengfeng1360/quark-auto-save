@@ -752,29 +752,29 @@ def ensure_directory_exists(account, dir_path, created_dirs):
     返回目录的fid。
     created_dirs 用于缓存已创建的目录 {path: fid}。
     """
-    # 规范化路径，处理多余的斜杠
-    dir_path = os.path.normpath(dir_path)
+    # 使用 Unix 风格的路径分隔符
+    # 规范化路径，处理多余的斜杠，但保持为 Unix 风格
+    dir_path = dir_path.replace('\\', '/').replace('//', '/')  # 将反斜杠替换为正斜杠，处理重复斜杠
     
     # 如果已经是根目录，直接返回
-    if dir_path == os.sep:
-        return "0" # 假设根目录的fid是"0"
+    if dir_path == "/":
+        return "0" # 根目录的fid是"0"
 
     # 如果已经在缓存中，直接返回
     if dir_path in created_dirs:
         return created_dirs[dir_path]
 
     # 从根目录开始，逐级构建路径
-    path_parts = dir_path.split(os.sep)
+    path_parts = [part for part in dir_path.split('/') if part]  # 移除空字符串
     
-    # 处理绝对路径的第一个空元素
-    if path_parts[0] == '':
-        path_parts = path_parts[1:]
-    
-    current_path = ""
-    parent_fid = "0" # 假设根目录的fid是"0"
+    current_path = "/"
+    parent_fid = "0" # 根目录的fid是"0"
 
     for part in path_parts:
-        current_path = os.path.join(current_path, part)
+        if current_path == "/":
+            current_path = f"/{part}"
+        else:
+            current_path = f"{current_path}/{part}"
 
         # 检查当前路径是否已在缓存中
         if current_path in created_dirs:
@@ -827,14 +827,13 @@ def transfer_files_with_structure():
         return jsonify({"success": False, "message": "未配置Cookie"})
 
     # --- 步骤 1: 获取基础保存路径 save_path 的真实 fid ---
-    save_path_fid = get_fid_by_path(account, save_path)
-    if not save_path_fid:
-        mkdir_res = account.mkdir(save_path)
-        if mkdir_res and mkdir_res.get("code") == 0:
-            save_path_fid = mkdir_res["data"]["fid"]
-            logging.info(f"成功创建保存路径: {save_path}")
-        else:
-            return jsonify({"success": False, "message": f"无法创建或找到保存路径: {save_path}"})
+    # 使用 ensure_directory_exists 确保路径存在（如果是多级路径也能正确创建）
+    try:
+        save_path_fid = ensure_directory_exists(account, save_path, {save_path: None})
+        if save_path_fid:
+            logging.info(f"成功获取或创建保存路径: {save_path}")
+    except Exception as e:
+        return jsonify({"success": False, "message": f"无法创建或找到保存路径: {save_path}, 错误: {str(e)}"})
     
     # --- 步骤 2: 统一的转存逻辑 ---
     # 不再需要区分单个目录转存和选择性转存，所有情况都用此逻辑处理
@@ -853,23 +852,23 @@ def transfer_files_with_structure():
         # 将父目录数组拼接成字符串
         parent_path_str = "/".join(parent_path_array)
         
-        # 计算目标目录路径
-        target_dir_path = os.path.join(save_path, parent_path_str)
+        # 计算目标目录路径 - 使用 Unix 风格的路径分隔符
+        if save_path == "/":
+            target_dir_path = f"/{parent_path_str.lstrip('/')}" if parent_path_str else "/"
+        else:
+            target_dir_path = f"{save_path.rstrip('/')}/{parent_path_str.lstrip('/')}" if parent_path_str else save_path
         
         # 确保目标目录存在
         if target_dir_path not in created_dirs:
-            existing_fid = get_fid_by_path(account, target_dir_path)
-            if existing_fid:
-                created_dirs[target_dir_path] = existing_fid
-            else:
-                mkdir_res = account.mkdir(target_dir_path)
-                if mkdir_res and mkdir_res.get("code") == 0:
-                    created_dirs[target_dir_path] = mkdir_res["data"]["fid"]
-                else:
-                    return jsonify({
-                        "success": False,
-                        "message": f"无法创建目录 {target_dir_path}: {mkdir_res.get('message')}"
-                    })
+            # 使用 ensure_directory_exists 函数来确保目录存在（会自动处理父目录创建）
+            try:
+                fid = ensure_directory_exists(account, target_dir_path, created_dirs)
+                created_dirs[target_dir_path] = fid
+            except Exception as e:
+                return jsonify({
+                    "success": False,
+                    "message": f"无法创建目录 {target_dir_path}: {str(e)}"
+                })
         
         target_dir_fid = created_dirs[target_dir_path]
         
@@ -894,7 +893,10 @@ def transfer_files_with_structure():
             if query_task_res.get("code") == 0:
                 save_as_top_fids = query_task_res["data"]["save_as"]["save_as_top_fids"]
                 if save_as_top_fids:
-                    new_dir_path = os.path.join(target_dir_path, file_name)
+                    if target_dir_path == "/":
+                        new_dir_path = f"/{file_name}"
+                    else:
+                        new_dir_path = f"{target_dir_path.rstrip('/')}/{file_name}"
                     created_dirs[new_dir_path] = save_as_top_fids[0]
     
     return jsonify({
@@ -930,14 +932,11 @@ def transfer_files():
     
     # 1. 获取或创建保存路径 ID
     save_path = re.sub(r"/{2,}", "/", f"/{save_path}")
-    to_pdir_fid = get_fid_by_path(account, save_path)
-    if not to_pdir_fid:
-        # 尝试创建
-        mkdir_res = account.mkdir(save_path)
-        if mkdir_res["code"] == 0:
-            to_pdir_fid = mkdir_res["data"]["fid"]
-        else:
-            return jsonify({"success": False, "message": f"Create save path failed: {mkdir_res.get('message')}"})
+    # 使用 ensure_directory_exists 确保路径存在（如果是多级路径也能正确创建）
+    try:
+        to_pdir_fid = ensure_directory_exists(account, save_path, {save_path: None})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Create save path failed: {str(e)}"})
             
     # 2. 执行转存
     total_success = 0
