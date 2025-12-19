@@ -503,10 +503,14 @@ function loadFileList(path, refresh = false) {
             if (response.data.success) {
                 currentFiles = response.data.data.content || [];
                 
+
+                
                 // 计算当前目录视频文件的公共子串
                 const videoFiles = currentFiles.filter(file => !file.is_dir && isVideoFile(file.name));
                 const allVideoNames = videoFiles.map(file => file.name);
                 currentVideoCommonSubstrings = findCommonSubstrings(allVideoNames);
+                // 【关键】在这里对 currentFiles 进行一次排序
+                sortCurrentFiles(currentFiles);
 
                 displayFileList(currentFiles);
                 displayFileGrid(currentFiles);
@@ -541,14 +545,8 @@ function displayFileList(files) {
     
     let html = '';
 
-    // 排序：文件夹在前，然后是文件
-    const sortedFiles = files.sort((a, b) => {
-        if (a.is_dir && !b.is_dir) return -1;
-        if (!a.is_dir && b.is_dir) return 1;
-        return a.name.localeCompare(b.name);
-    });
-    
-    sortedFiles.forEach(file => {
+    // 【修改】移除这里的排序逻辑，直接使用传入的已排序files
+    files.forEach(file => {
         const icon = file.is_dir ? 'bi-folder' : getFileIcon(file.name);
         const size = file.is_dir ? '' : formatBytes(file.size);
         
@@ -960,12 +958,10 @@ function updatePlayerSetting(key, value) {
 
 
 function playNextVideo(currentFileName) {
-    // 找到当前目录下的所有视频文件
+    // 找到当前目录下的所有视频文件（从已排序的 currentFiles 中获取）
     const videoFiles = currentFiles.filter(file => !file.is_dir && isVideoFile(file.name));
     
-    // 按名称排序（假设它们在 currentFiles 中已经是排序好的，或者重新排序以防万一）
-    // currentFiles 在 loadFileList 中已经排过序了，videoFiles 保持相对顺序
-    
+    // 【修改】不再重新排序，直接使用 currentFiles 中的顺序
     const currentIndex = videoFiles.findIndex(f => f.name === currentFileName);
     
     if (currentIndex !== -1 && currentIndex < videoFiles.length - 1) {
@@ -1089,7 +1085,7 @@ function getFileIcon(fileName) {
 }
 
 function isVideoFile(fileName) {
-    const videoExts = ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v'];
+    const videoExts = ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v', 'ts', 'rmvb', '3gp', 'mpg', 'mpeg', 'm3u8'];
     const ext = fileName.split('.').pop().toLowerCase();
     return videoExts.includes(ext);
 }
@@ -1176,60 +1172,191 @@ function deleteSelectedFiles() {
             showError('Error while deleting');
         });
 }
+
+/**
+ * 从文件名中提取差异部分（非公共部分）
+ * @param {string} fileName - 文件名
+ * @param {Array} commonSubstrings - 公共子串数组
+ * @returns {string} - 差异部分字符串
+ */
+function extractUniquePart(fileName, commonSubstrings) {
+    if (!commonSubstrings || commonSubstrings.length === 0) {
+        return fileName;
+    }
+    
+    // 创建一个布尔数组标记哪些字符是公共部分
+    const isCommon = new Array(fileName.length).fill(false);
+    
+    // 对每个公共子串，在文件名中找到所有出现位置并标记
+    const sortedCommons = [...commonSubstrings].sort((a, b) => b.length - a.length);
+    
+    for (const sub of sortedCommons) {
+        let startPos = 0;
+        while (true) {
+            const index = fileName.indexOf(sub, startPos);
+            if (index === -1) break;
+            
+            // 标记该区间的字符为公共
+            for (let k = 0; k < sub.length; k++) {
+                isCommon[index + k] = true;
+            }
+            startPos = index + 1;
+        }
+    }
+    
+    // 提取所有非公共字符，构建差异部分
+    let uniquePart = '';
+    for (let i = 0; i < fileName.length; i++) {
+        if (!isCommon[i]) {
+            uniquePart += fileName[i];
+        }
+    }
+    
+    return uniquePart || fileName; // 如果没有差异部分，返回原文件名
+}
+
+/**
+ * 简单的自然排序函数
+ * @param {string} a - 第一个字符串
+ * @param {string} b - 第二个字符串
+ * @returns {number} - 比较结果
+ */
+function naturalCompare(a, b) {
+    const regex = /(\d+)|(\D+)/g;
+    const aParts = a.match(regex) || [];
+    const bParts = b.match(regex) || [];
+    
+    const minLength = Math.min(aParts.length, bParts.length);
+    
+    for (let i = 0; i < minLength; i++) {
+        const aPart = aParts[i];
+        const bPart = bParts[i];
+        
+        // 如果都是数字部分
+        if (/^\d+$/.test(aPart) && /^\d+$/.test(bPart)) {
+            const aNum = parseInt(aPart, 10);
+            const bNum = parseInt(bPart, 10);
+            if (aNum !== bNum) {
+                return aNum - bNum;
+            }
+        } else {
+            // 如果不都是数字，或者都不是数字，按字符串比较
+            const comparison = aPart.localeCompare(bPart);
+            if (comparison !== 0) {
+                return comparison;
+            }
+        }
+    }
+    
+    // 如果比较的部分都相同，比较长度
+    return aParts.length - bParts.length;
+}
+
+/**
+ * 基于差异部分的自然排序函数
+ * @param {string} a - 第一个文件名
+ * @param {string} b - 第二个文件名
+ * @param {Array} commonSubstrings - 公共子串数组
+ * @returns {number} - 比较结果
+ */
+function uniquePartNaturalCompare(a, b, commonSubstrings) {
+    // 提取差异部分
+    const uniqueA = extractUniquePart(a, commonSubstrings);
+    const uniqueB = extractUniquePart(b, commonSubstrings);
+    
+    // 如果差异部分相同，比较完整文件名
+    if (uniqueA === uniqueB) {
+        return a.localeCompare(b);
+    }
+    
+    // 对差异部分进行自然排序
+    return naturalCompare(uniqueA, uniqueB);
+}
+
+/**
+ * 对 currentFiles 进行排序的核心函数
+ */
+function sortCurrentFiles(fileList) {
+    fileList.sort((a, b) => {
+        // 文件夹优先
+        if (a.is_dir && !b.is_dir) return -1;
+        if (!a.is_dir && b.is_dir) return 1;
+        
+        // 如果都是文件
+        if (!a.is_dir && !b.is_dir) {
+            // 如果都是视频文件，使用基于差异部分的排序
+            if (isVideoFile(a.name) && isVideoFile(b.name)) {
+                return uniquePartNaturalCompare(a.name, b.name, currentVideoCommonSubstrings);
+            }
+            
+            // 其他文件使用自然排序
+            return naturalCompare(a.name, b.name);
+        }
+        
+        // 如果都是文件夹，使用自然排序
+        return naturalCompare(a.name, b.name);
+    });
+}
+
+
 function findCommonSubstrings(strList) {
-    // 边界情况处理：如果数组为空
-    if (!strList || strList.length === 0) {
-        return [];
-    }
+    if (!strList || strList.length === 0) return [];
 
-    // 1. 为了优化性能，找到长度最短的字符串作为基准 (Reference)
-    const shortestStr = strList.reduce((a, b) => a.length <= b.length ? a : b);
-    const n = shortestStr.length;
+    // 1. 预处理：转为小写用于匹配
+    const lowerStrList = strList.map(s => s.toLowerCase());
+    const shortestLower = lowerStrList.reduce((a, b) => a.length <= b.length ? a : b);
+    const n = shortestLower.length;
 
-    const commonCandidates = new Set();
+    // 找到所有小写的公共子串候选者
+    const commonLowerCandidates = new Set();
 
-    // 2. 获取基准字符串的所有子串，并检查是否在其他所有字符串中出现
-    // 外层循环遍历所有可能的长度
     for (let length = 1; length <= n; length++) {
-        // 内层循环遍历该长度下的所有起始位置
         for (let i = 0; i <= n - length; i++) {
-            const sub = shortestStr.substring(i, i + length);
-
-            // 检查这个子串是否存在于数组的所有字符串中
-            if (strList.every(s => s.includes(sub))) {
-                commonCandidates.add(sub);
+            const subLower = shortestLower.substring(i, i + length);
+            if (lowerStrList.every(ls => ls.includes(subLower))) {
+                commonLowerCandidates.add(subLower);
             }
         }
     }
 
-    // 如果没有公共子串，直接返回空
-    if (commonCandidates.size === 0) {
-        return [];
+    if (commonLowerCandidates.size === 0) return [];
+
+    // 2. 筛选“极大”公共子串（小写层面）
+    const sortedLower = Array.from(commonLowerCandidates).sort((a, b) => b.length - a.length);
+    const maximalLower = [];
+    for (const cand of sortedLower) {
+        if (!maximalLower.some(existing => existing.includes(cand))) {
+            maximalLower.push(cand);
+        }
     }
 
-    // 3. 提取“极大”子串
-    // 先将候选子串按长度从长到短排序
-    const sortedCandidates = Array.from(commonCandidates).sort((a, b) => b.length - a.length);
+    // 3. 核心修改：根据极大子串，去原始字符串中提取不同的原始大小写
+    const finalResult = [];
+    
+    // 为了保持顺序，我们按照在第一个字符串中出现的顺序来处理
+    const firstStrLower = lowerStrList[0];
+    maximalLower.sort((a, b) => firstStrLower.indexOf(a) - firstStrLower.indexOf(b));
 
-    const result = [];
-
-    for (const cand of sortedCandidates) {
-        // 检查当前 cand 是否是 result 中已存在的某个字符串的子串
-        let isSubset = false;
-        for (const existing in result) {
-            if (result[existing].includes(cand)) {
-                isSubset = true;
-                break;
+    for (const subLower of maximalLower) {
+        const variants = new Set(); // 存储该子串在不同文件中的原始形态
+        
+        strList.forEach((originalStr) => {
+            const lowerOrig = originalStr.toLowerCase();
+            let startPos = 0;
+            // 循环查找，防止同一个字符串里有多个位置匹配（虽然在极大子串逻辑下通常取第一个即可）
+            while ((startPos = lowerOrig.indexOf(subLower, startPos)) !== -1) {
+                const originalPiece = originalStr.substring(startPos, startPos + subLower.length);
+                variants.add(originalPiece);
+                startPos += subLower.length;
+                break; // 找到第一个匹配即可
             }
-        }
+        });
 
-        // 如果它不是任何现有结果的子集，则将其加入结果
-        if (!isSubset) {
-            result.push(cand);
-        }
+        // 将该子串的所有原始形态加入结果列表
+        variants.forEach(v => finalResult.push(v));
     }
 
-    return result;
+    return finalResult;
 }
 
 function highlightFileName(fileName, commonSubstrings) {
