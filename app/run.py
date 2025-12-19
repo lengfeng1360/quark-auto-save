@@ -123,6 +123,34 @@ def reset_alist_client():
     global _alist_instance
     _alist_instance = None
 
+def refresh_alist_cache(path):
+    """
+    刷新 Alist 缓存，确保夸克转存后的数据能及时同步到 Alist
+    
+    Args:
+        path: 需要刷新的路径
+        
+    Returns:
+        bool: 刷新是否成功
+    """
+    try:
+        alist_client = get_alist_client()
+        if not alist_client:
+            logging.warning("Alist 未配置，跳过缓存刷新")
+            return False
+            
+        # 调用 Alist 的 refresh 方法
+        refresh_result = alist_client.refresh(path)
+        if refresh_result:
+            logging.info(f"✅ Alist 缓存刷新成功: {path}")
+            return True
+        else:
+            logging.warning(f"⚠️ Alist 缓存刷新失败: {path}")
+            return False
+    except Exception as e:
+        logging.error(f"❌ Alist 缓存刷新异常: {str(e)}")
+        return False
+
 def get_quark_client():
     """
     统一获取 Quark 客户端实例。
@@ -899,8 +927,17 @@ def transfer_files_with_structure():
                         new_dir_path = f"{target_dir_path.rstrip('/')}/{file_name}"
                     created_dirs[new_dir_path] = save_as_top_fids[0]
     
+    # --- 方案1：转存成功后自动刷新alist缓存 ---
+    # 转存成功后，刷新alist缓存以确保数据同步
+    try:
+        alist_save_path = _get_user_path(base_save_path, True)
+        refresh_alist_cache(alist_save_path)
+        logging.info(f"已自动刷新 Alist 缓存: {alist_save_path}")
+    except Exception as e:
+        logging.warning(f"转存成功但刷新 Alist 缓存失败: {str(e)}")
+    
     return jsonify({
-        "success": True, 
+        "success": True,
         "message": f"成功转存 {len(items)} 个项目。"
     })
 
@@ -967,6 +1004,16 @@ def transfer_files():
             logging.error(traceback.format_exc())
             errors.append(f"Batch {i//batch_size + 1} error: {str(e)}")
             
+    # --- 方案1：转存成功后自动刷新alist缓存 ---
+    # 如果有文件成功转存，刷新alist缓存以确保数据同步
+    if total_success > 0:
+        try:
+            alist_save_path = _get_user_path(save_path, True)
+            refresh_alist_cache(alist_save_path)
+            logging.info(f"已自动刷新 Alist 缓存: {alist_save_path}")
+        except Exception as e:
+            logging.warning(f"转存成功但刷新 Alist 缓存失败: {str(e)}")
+    
     if len(errors) == 0:
         return jsonify({"success": True, "message": f"Successfully transferred {total_success} items."})
     else:
