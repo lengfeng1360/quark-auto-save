@@ -726,6 +726,27 @@ def delete_file():
     else:
         response = {"success": False, "message": "缺失必要字段: fid"}
     return jsonify(response)
+
+##规范夸克的路径
+def format_quark_parent_path(path):
+    """
+    规范化夸克路径，处理多余的斜杠，保持为 Unix 风格。
+    """
+    # 将反斜杠替换为正斜杠
+    path = path.replace('\\', '/')
+
+    # 处理多余的斜杠
+    path = re.sub(r'/{2,}', '/', path)
+    
+    if not path.startswith('/'):
+        path = '/' + path
+
+    # 规范化路径，处理多余的斜杠.夸克不能斜杆结尾.不然找不到路径
+    if path != "/" and path.endswith('/'):
+        path = path[:-1]
+
+    return path
+
     
 def _get_user_path(path, isAlistpath=False):
     """
@@ -744,8 +765,7 @@ def _get_user_path(path, isAlistpath=False):
 
     save_path_default = config_data.get("save_path_default", "")
 
-    if save_path_default != "" and save_path_default.endswith('/'):
-        save_path_default = save_path_default[:-1]
+
 
 
     if not path.startswith('/'):
@@ -771,8 +791,9 @@ def _get_user_path(path, isAlistpath=False):
             final_path = path
         else:
             final_path = f"{save_path_default}/{username}{path}"
-        
-    return re.sub(r'/{2,}', '/', final_path)
+
+    final_path = format_quark_parent_path(final_path)
+    return final_path
 
 def ensure_directory_exists(account, dir_path, created_dirs):
     """
@@ -846,7 +867,8 @@ def transfer_files_with_structure():
         return jsonify({"success": False, "message": "Missing required parameters."})
 
     save_path = _get_user_path(base_save_path, False)
-    save_path = re.sub(r"/{2,}", "/", f"/{save_path}")
+    
+
     logging.info(f"save_path: {save_path}")
 
     # 优化点：使用 helper
@@ -857,7 +879,7 @@ def transfer_files_with_structure():
     # --- 步骤 1: 获取基础保存路径 save_path 的真实 fid ---
     # 使用 ensure_directory_exists 确保路径存在（如果是多级路径也能正确创建）
     try:
-        save_path_fid = ensure_directory_exists(account, save_path, {save_path: None})
+        save_path_fid = ensure_directory_exists(account, save_path, {})
         if save_path_fid:
             logging.info(f"成功获取或创建保存路径: {save_path}")
     except Exception as e:
@@ -971,7 +993,7 @@ def transfer_files():
     save_path = re.sub(r"/{2,}", "/", f"/{save_path}")
     # 使用 ensure_directory_exists 确保路径存在（如果是多级路径也能正确创建）
     try:
-        to_pdir_fid = ensure_directory_exists(account, save_path, {save_path: None})
+        to_pdir_fid = ensure_directory_exists(account, save_path, {})
     except Exception as e:
         return jsonify({"success": False, "message": f"Create save path failed: {str(e)}"})
             
@@ -1129,10 +1151,8 @@ def get_fs_qklist():
         # 注意：这里 isAlistpath 设为 False，因为我们直接操作夸克网盘，不需要 Alist 的挂载前缀
         path = _get_user_path(raw_path, isAlistpath=False)
 
-        ## 规范化路径，处理多余的斜杠.夸克不能斜杆结尾.不然找不到路径
+        
 
-        if path != "/"  and path.endswith('/'):
-            path = path[:-1]
 
         logging.info(f"Listing Quark path: {path}")
         # 3. 将路径转换为 fid (File ID)
