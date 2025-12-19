@@ -134,6 +134,27 @@ def get_quark_client():
     # Quark 类的初始化开销很小（主要是字符串解析），直接每次实例化即可，保证线程安全
     return Quark(cookies[0])
 
+def get_fid_by_path(account, path):
+    """
+    通用辅助函数：根据路径获取目录的fid。
+    特殊处理根目录的情况（根目录的fid是固定的"0"）。
+    
+    Args:
+        account: Quark 客户端实例
+        path: 要获取fid的路径
+    
+    Returns:
+        str: 目录的fid，如果失败则返回None
+    """
+    if path == "/":
+        return "0"  # 根目录的fid固定为"0"
+    
+    # 非根目录，使用API获取fid
+    fids_res = account.get_fids([path])
+    if fids_res:
+        return fids_res[0]["fid"]
+    return None
+
 # 过滤werkzeug日志输出
 if not DEBUG:
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
@@ -568,9 +589,9 @@ def get_share_detail():
         account = get_quark_client()
         
         if account:
-            get_fids = account.get_fids([task.get("savepath", "")])
-            if get_fids:
-                dir_file_list = account.ls_dir(get_fids[0]["fid"])["data"]["list"]
+            savepath_fid = get_fid_by_path(account, task.get("savepath", ""))
+            if savepath_fid:
+                dir_file_list = account.ls_dir(savepath_fid)["data"]["list"]
                 dir_filename_list = [dir_file["file_name"] for dir_file in dir_file_list]
             else:
                 dir_file_list = []
@@ -628,9 +649,13 @@ def get_savepath_detail():
     paths = []
     if path := request.args.get("path"):
         path = re.sub(r"/+", "/", path)
-        if path == "/":
-            fid = 0
-        else:
+        # 使用辅助函数处理路径获取fid
+        fid = get_fid_by_path(account, path)
+        if fid is None:
+            return jsonify({"success": False, "data": {"error": "获取fid失败"}})
+            
+        # 处理路径数组
+        if path != "/":
             dir_names = path.split("/")
             if dir_names[0] == "":
                 dir_names.pop(0)
@@ -639,14 +664,16 @@ def get_savepath_detail():
             for dir_name in dir_names:
                 current_path += "/" + dir_name
                 path_fids.append(current_path)
-            if get_fids := account.get_fids(path_fids):
-                fid = get_fids[-1]["fid"]
+            get_fids = account.get_fids(path_fids)
+            if get_fids:
                 paths = [
                     {"fid": get_fid["fid"], "name": dir_name}
                     for get_fid, dir_name in zip(get_fids, dir_names)
                 ]
             else:
                 return jsonify({"success": False, "data": {"error": "获取fid失败"}})
+        else:
+            paths = []
     else:
         fid = request.args.get("fid", "0")
     file_list = {
@@ -755,9 +782,8 @@ def ensure_directory_exists(account, dir_path, created_dirs):
             continue
         
         # 尝试获取目录，可能它已存在但不在缓存中
-        get_fids_res = account.get_fids([current_path])
-        if get_fids_res:
-            new_fid = get_fids_res[0]["fid"]
+        new_fid = get_fid_by_path(account, current_path)
+        if new_fid:
             created_dirs[current_path] = new_fid
             parent_fid = new_fid
             print(f"ℹ️ 目录已存在: {current_path} (fid: {new_fid})")
@@ -801,18 +827,14 @@ def transfer_files_with_structure():
         return jsonify({"success": False, "message": "未配置Cookie"})
 
     # --- 步骤 1: 获取基础保存路径 save_path 的真实 fid ---
-    save_path_fid = "0"
-    if save_path != "/":
-        get_fids_res = account.get_fids([save_path])
-        if get_fids_res:
-            save_path_fid = get_fids_res[0]["fid"]
+    save_path_fid = get_fid_by_path(account, save_path)
+    if not save_path_fid:
+        mkdir_res = account.mkdir(save_path)
+        if mkdir_res and mkdir_res.get("code") == 0:
+            save_path_fid = mkdir_res["data"]["fid"]
+            logging.info(f"成功创建保存路径: {save_path}")
         else:
-            mkdir_res = account.mkdir(save_path)
-            if mkdir_res and mkdir_res.get("code") == 0:
-                save_path_fid = mkdir_res["data"]["fid"]
-                logging.info(f"成功创建保存路径: {save_path}")
-            else:
-                return jsonify({"success": False, "message": f"无法创建或找到保存路径: {save_path}"})
+            return jsonify({"success": False, "message": f"无法创建或找到保存路径: {save_path}"})
     
     # --- 步骤 2: 统一的转存逻辑 ---
     # 不再需要区分单个目录转存和选择性转存，所有情况都用此逻辑处理
@@ -836,16 +858,16 @@ def transfer_files_with_structure():
         
         # 确保目标目录存在
         if target_dir_path not in created_dirs:
-            dir_fids = account.get_fids([target_dir_path])
-            if dir_fids:
-                created_dirs[target_dir_path] = dir_fids[0]["fid"]
+            existing_fid = get_fid_by_path(account, target_dir_path)
+            if existing_fid:
+                created_dirs[target_dir_path] = existing_fid
             else:
                 mkdir_res = account.mkdir(target_dir_path)
                 if mkdir_res and mkdir_res.get("code") == 0:
                     created_dirs[target_dir_path] = mkdir_res["data"]["fid"]
                 else:
                     return jsonify({
-                        "success": False, 
+                        "success": False,
                         "message": f"无法创建目录 {target_dir_path}: {mkdir_res.get('message')}"
                     })
         
@@ -908,19 +930,14 @@ def transfer_files():
     
     # 1. 获取或创建保存路径 ID
     save_path = re.sub(r"/{2,}", "/", f"/{save_path}")
-    if save_path == "/":
-         to_pdir_fid = "0"
-    else:
-        get_fids = account.get_fids([save_path])
-        if get_fids:
-            to_pdir_fid = get_fids[0]["fid"]
+    to_pdir_fid = get_fid_by_path(account, save_path)
+    if not to_pdir_fid:
+        # 尝试创建
+        mkdir_res = account.mkdir(save_path)
+        if mkdir_res["code"] == 0:
+            to_pdir_fid = mkdir_res["data"]["fid"]
         else:
-            # 尝试创建
-            mkdir_res = account.mkdir(save_path)
-            if mkdir_res["code"] == 0:
-                to_pdir_fid = mkdir_res["data"]["fid"]
-            else:
-                return jsonify({"success": False, "message": f"Create save path failed: {mkdir_res.get('message')}"})
+            return jsonify({"success": False, "message": f"Create save path failed: {mkdir_res.get('message')}"})
             
     # 2. 执行转存
     total_success = 0
@@ -1073,25 +1090,20 @@ def get_fs_qklist():
 
         logging.info(f"Listing Quark path: {path}")
         # 3. 将路径转换为 fid (File ID)
-        target_fid = "0" # 默认为根目录
-        if path != "/":
-            # get_fids 返回 [{'fid': 'xxx', 'file_path': 'xxx'}]
-            fids_res = account.get_fids([path])
-            if fids_res:
-                target_fid = fids_res[0]["fid"]
-            else:
-                logging.info("路径不存在，返回空列表，模仿 Alist 行为")
-                # 路径不存在，返回空列表，模仿 Alist 行为
-                return jsonify({
-                    "success": True, 
-                    "data": {
-                        "content": [],
-                        "total": 0,
-                        "readme": "",
-                        "write": True,
-                        "provider": "QuarkDirect"
-                    }
-                })
+        target_fid = get_fid_by_path(account, path)
+        if not target_fid:
+            logging.info("路径不存在，返回空列表，模仿 Alist 行为")
+            # 路径不存在，返回空列表，模仿 Alist 行为
+            return jsonify({
+                "success": True,
+                "data": {
+                    "content": [],
+                    "total": 0,
+                    "readme": "",
+                    "write": True,
+                    "provider": "QuarkDirect"
+                }
+            })
 
         # 4. 获取文件列表
         # ls_dir 内部已经处理了翻页逻辑，会返回该目录下所有文件
@@ -1285,20 +1297,10 @@ def delete_fs_items():
         # 3. 遍历父目录，查找目标文件的 FID
         for parent_dir, file_names in files_by_parent.items():
             # 获取父目录的 FID
-            # get_fids 返回 [{'fid': 'xxx', ...}]
-            dir_info_list = account.get_fids([parent_dir])
-            
-            if not dir_info_list:
+            parent_fid = get_fid_by_path(account, parent_dir)
+            if not parent_fid:
                 logging.warning(f"无法找到父目录: {parent_dir}，跳过该目录下的文件")
                 continue
-                
-            # 提取父目录 FID (通常结果列表对应输入列表，取第一个)
-            parent_obj = dir_info_list[0]
-            if not parent_obj or 'fid' not in parent_obj:
-                logging.warning(f"解析父目录FID失败: {parent_dir}")
-                continue
-                
-            parent_fid = parent_obj['fid']
 
             # 列出父目录下的所有文件
             ls_res = account.ls_dir(parent_fid)
