@@ -242,7 +242,7 @@
     .close-video-btn {
         position: absolute;
         top: 15px;
-        right: 15px;
+        left: calc(100% - 55px);
         font-size: 2rem;
         color: white;
         background-color: rgba(0, 0, 0, 0.5);
@@ -695,6 +695,108 @@ function _createProxyUrl(originalUrl) {
     return `https://quarkurlproxy.deno.dev?url=${encodeURIComponent(originalUrl)}`;
 }
 
+// 获取视频下载链接的封装函数
+function getVideoDownloadUrl(filePath, sessionId = null) {
+    return new Promise((resolve, reject) => {
+        let axiosConfig = undefined;
+        
+        // 使用 axios.CancelToken（如果可用）支持取消请求
+        if (typeof axios !== 'undefined' && axios.CancelToken && sessionId) {
+            const cancelSource = axios.CancelToken.source();
+            if (currentPlaySession && currentPlaySession.id === sessionId) {
+                currentPlaySession.cancelSource = cancelSource;
+            }
+            axiosConfig = { cancelToken: cancelSource.token };
+        }
+        
+        axios.post('/api/library/fs/download', { path: filePath }, axiosConfig)
+            .then(response => {
+                if (response.data.success) {
+                    resolve({
+                        url: response.data.data.download_url,
+                        isM3U8: response.data.data.download_url.includes('.m3u8')
+                    });
+                } else {
+                    reject(new Error(response.data.message || '获取视频地址失败'));
+                }
+            })
+            .catch(error => {
+                // 主动取消请求的场景，静默处理
+                if (typeof axios !== 'undefined' && axios.isCancel && axios.isCancel(error)) {
+                    console.log('Video request canceled for session', sessionId, error.message || '');
+                    reject(new Error('Request canceled'));
+                } else {
+                    reject(error);
+                }
+            });
+    });
+}
+
+// 处理 HLS 错误的封装函数
+function setupHLSErrorHandling(dp, downloadUrl) {
+    if (!dp || !dp.plugins || !dp.plugins.hls) {
+        return;
+    }
+    
+    dp.plugins.hls.on(Hls.Events.ERROR, function (event, data) {
+        console.error('HLS.js error detected:', data);
+        
+        // 如果是致命的网络错误，就显示回退UI
+        if (data.fatal && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            showVideoErrorFallback(downloadUrl);
+        }
+    });
+}
+
+// 显示视频错误回退UI的封装函数
+function showVideoErrorFallback(downloadUrl) {
+    const dplayerContainer = document.getElementById('dplayer');
+    if (dplayerContainer) {
+        dplayerContainer.innerHTML = `
+            <div class="video-loading-overlay" style="background-color: #000; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;">
+                <button class="close-video-btn" onclick="closeVideoPlayer()">&times;</button>
+                <i class="bi bi-exclamation-triangle mb-3" style="font-size: 3rem; color: #f85149;"></i>
+                <h5>视频加载失败</h5>
+                <p class="text-muted mb-4">这可能是由CORS策略或网络问题引起的。您可以尝试在新标签页中打开它。</p>
+                <a href="${downloadUrl}" target="_blank" class="btn btn-primary">
+                    <i class="bi bi-box-arrow-up-right me-2"></i>点击尝试在新标签页中打开播放
+                </a>
+            </div>
+        `;
+    }
+}
+
+// 更新视频信息UI的封装函数
+function updateVideoInfo(fileName) {
+    const displayName = highlightFileName(fileName, currentVideoCommonSubstrings);
+    const videoInfo = document.querySelector('.video-info h5');
+    if (videoInfo) {
+        videoInfo.innerHTML = typeof displayName === 'string' ? displayName : displayName.html;
+        videoInfo.title = fileName;
+    }
+    
+    const videoPath = document.querySelector('.video-info p');
+    if (videoPath) {
+        videoPath.textContent = `播放路径: ${currentPath}`;
+    }
+}
+
+// 显示加载状态的封装函数
+function showLoadingOverlay(message = '正在加载视频...') {
+    const dplayerContainer = document.getElementById('dplayer');
+    if (dplayerContainer) {
+        const loadingOverlay = document.createElement('div');
+        loadingOverlay.className = 'video-loading-overlay';
+        loadingOverlay.innerHTML = `
+            <div class="spinner-border text-light" role="status"></div>
+            <p class="mt-3">${message}</p>
+        `;
+        dplayerContainer.appendChild(loadingOverlay);
+        return loadingOverlay;
+    }
+    return null;
+}
+
 // 取消当前会话的下载请求（如果存在）
 function cancelCurrentVideoRequest(reason) {
     if (currentPlaySession && currentPlaySession.cancelSource && typeof currentPlaySession.cancelSource.cancel === 'function') {
@@ -781,81 +883,63 @@ function playVideo(fileName) {
         fileName: fileName,
         path: filePath,
         state: 'RequestingUrl',
-        cancelSource: null
+        cancelSource: null,
+        initialSeekPerformed: false
     };
-
-    let axiosConfig = undefined;
-
-    // 使用 axios.CancelToken（如果可用）支持取消请求
-    if (typeof axios !== 'undefined' && axios.CancelToken) {
-        const cancelSource = axios.CancelToken.source();
-        currentPlaySession.cancelSource = cancelSource;
-        axiosConfig = { cancelToken: cancelSource.token };
-    }
-
-    axios.post('/api/library/fs/download', { path: filePath }, axiosConfig)
-        .then(response => {
+    // 使用封装的函数获取视频下载链接
+    getVideoDownloadUrl(filePath, sessionId)
+        .then(({ url: downloadUrl, isM3U8 }) => {
             // 如果会话已失效或被新的点击替代，直接忽略结果
             if (!currentPlaySession || currentPlaySession.id !== sessionId) {
                 return;
             }
 
-            if (response.data.success) {
-                const downloadUrl = response.data.data.download_url;
-                const isM3U8 = downloadUrl.includes('.m3u8');
+            currentPlaySession.state = 'InitializingPlayer';
 
-                currentPlaySession.state = 'InitializingPlayer';
+            const dplayerContainer = document.getElementById('dplayer');
+            if (!dplayerContainer) {
+                // UI 已经被关闭或切换，不再初始化播放器
+                return;
+            }
 
-                // --- 核心：主动显示回退UI的函数 ---
-                const showFallbackUI = () => {
-                    console.log('HLS error detected, showing fallback UI.');
-                    const dplayerContainer = document.getElementById('dplayer');
-                    if (dplayerContainer) {
-                        dplayerContainer.innerHTML = `
-                            <div class="video-loading-overlay" style="background-color: #000; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 20px;">
-                                <i class="bi bi-exclamation-triangle mb-3" style="font-size: 3rem; color: #f85149;"></i>
-                                <h5>视频加载失败</h5>
-                                <p class="text-muted mb-4">这可能是由CORS策略或网络问题引起的。您可以尝试在新标签页中打开它。</p>
-                                <a href="${downloadUrl}" target="_blank" class="btn btn-primary">
-                                    <i class="bi bi-box-arrow-up-right me-2"></i>点击尝试在新标签页中打开播放
-                                </a>
-                            </div>
-                        `;
-                    }
-                };
-
-                const dplayerContainer = document.getElementById('dplayer');
-                if (!dplayerContainer) {
-                    // UI 已经被关闭或切换，不再初始化播放器
-                    return;
+            playParams = {
+                container: dplayerContainer,
+                autoplay: true, // 设置为 true
+                // preload: 'auto',  // 让浏览器尽可能多加载
+                video: {
+                    url: downloadUrl, // 直接使用获取到的 URL
+                    type: isM3U8?'auto':'normal',
+                    referrerPolicy: 'no-referrer'
                 }
+            }
+            if(playerSettings.autoNext){
+                highlight = [];
+                // if(playerSettings.skipStart > 0){
+                //     highlight.push({
+                //         time: playerSettings.skipStart,
+                //         text: '跳过片头'
+                //     });
+                // }
+                // if(playerSettings.skipEnd > 0){
+                //     highlight.push({
+                //         time: playerSettings.skipEnd,
+                //         text: '跳过片尾'
+                //     });
+                // }
+                // playParams.highlight = highlight;
+            
+            }
 
-                // 3. 获取到链接后，再初始化播放器
-                dp = new DPlayer({
-                    container: dplayerContainer,
-                    autoplay: true, // 设置为 true
-                    // preload: 'auto',  // 让浏览器尽可能多加载
-                    video: {
-                        url: downloadUrl, // 直接使用获取到的 URL
-                        type: isM3U8?'auto':'normal',
-                        referrerPolicy: 'no-referrer'
-                    }
-                });
 
-                currentPlaySession.state = 'Playing';
+            // 3. 获取到链接后，再初始化播放器
+            dp = new DPlayer(playParams);
 
-                // --- 核心：监听 hls.js 的错误事件 ---
-                // 只有当 DPlayer 确实使用了 hls.js 时，dp.plugins.hls 才存在
-                if (isM3U8 && dp.plugins && dp.plugins.hls) {
-                    dp.plugins.hls.on(Hls.Events.ERROR, function (event, data) {
-                        console.error('HLS.js error detected:', data);
+            currentPlaySession.state = 'Playing';
 
-                        // 如果是致命的网络错误，就显示回退UI
-                        if (data.fatal && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                            showFallbackUI();
-                        }
-                    });
-                }
+            // 设置 HLS 错误处理
+            if (isM3U8) {
+                setupHLSErrorHandling(dp, downloadUrl);
+            }
 
                 // 监听播放结束事件以实现自动下一集（仅对当前会话生效）
                 dp.on('ended', () => {
@@ -863,21 +947,13 @@ function playVideo(fileName) {
                         return;
                     }
                     if (playerSettings.autoNext) {
-                        playNextVideo(fileName);
+                        playNextVideo(currentPlaySession.fileName);
                     }
                 });
+                
 
                 // 优化跳过片头：在视频准备好但未播放时跳转（仅对当前会话生效）
-                let initialSeekPerformed = false;
-                dp.on('canplay', () => {
-                    if (!currentPlaySession || currentPlaySession.id !== sessionId) {
-                        return;
-                    }
-                    if (!initialSeekPerformed && playerSettings.skipStart > 0) {
-                        initialSeekPerformed = true;
-                        dp.seek(playerSettings.skipStart);
-                    }
-                });
+                // 注意：此事件监听器在后续代码中已扩展，此处不再重复定义
 
                 // 监听时间更新以实现跳过片尾（仅对当前会话生效）
                 dp.on('timeupdate', () => {
@@ -887,9 +963,24 @@ function playVideo(fileName) {
                     if (playerSettings.skipEnd > 0 && dp.video.duration > 0) {
                         if (dp.video.currentTime >= dp.video.duration - playerSettings.skipEnd) {
                             if (playerSettings.autoNext) {
-                                playNextVideo(fileName);
+                                playNextVideo(currentPlaySession.fileName);
                             }
                         }
+                    }
+                });
+                
+
+                currentPlaySession.initialSeekPerformed = false; // 重置标志以允许新的初始跳转
+                // 添加 canplay 事件处理，确保视频准备好播放后处理跳过片头
+                dp.on('canplay', () => {
+
+                    if (!currentPlaySession || currentPlaySession.id !== sessionId) {
+                        return;
+                    }
+
+                    if (!currentPlaySession.initialSeekPerformed && playerSettings.skipStart > 0) {
+                        currentPlaySession.initialSeekPerformed = true;
+                        dp.seek(playerSettings.skipStart);
                     }
                 });
 
@@ -910,14 +1001,6 @@ function playVideo(fileName) {
                 document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
                 document.addEventListener('mozfullscreenchange', handleFullscreenChange);
                 document.addEventListener('msfullscreenchange', handleFullscreenChange);
-            } else {
-                // 如果获取链接失败，显示错误信息
-                currentPlaySession.state = 'FallbackError';
-                const dplayerContainer = document.getElementById('dplayer');
-                if (dplayerContainer) {
-                    dplayerContainer.innerHTML = `<div class="video-loading-overlay" style="background-color: #000;">获取视频地址失败: ${response.data.message}</div>`;
-                }
-            }
         })
         .catch(error => {
             // 如果会话已失效或被新的点击替代，忽略错误
@@ -926,15 +1009,15 @@ function playVideo(fileName) {
             }
 
             // 主动取消请求的场景，静默处理
-            if (typeof axios !== 'undefined' && axios.isCancel && axios.isCancel(error)) {
-                console.log('Video request canceled for session', sessionId, error.message || '');
+            if (error.message === 'Request canceled') {
                 return;
             }
 
-            // 网络错误
+            // 显示错误信息
+            currentPlaySession.state = 'FallbackError';
             const dplayerContainer = document.getElementById('dplayer');
             if (dplayerContainer) {
-                dplayerContainer.innerHTML = `<div class="video-loading-overlay" style="background-color: #000;">网络请求失败: ${error.message}</div>`;
+                dplayerContainer.innerHTML = `<div class="video-loading-overlay" style="background-color: #000;">获取视频地址失败: ${error.message}</div>`;
             }
         })
         .finally(() => {
@@ -944,6 +1027,7 @@ function playVideo(fileName) {
             }
             isRequestingVideo = false;
         });
+
 
 }
 
@@ -969,8 +1053,21 @@ function updatePlayerSetting(key, value) {
     localStorage.setItem('quark_player_settings', JSON.stringify(playerSettings));
 }
 
-
+playNextVideoTime = 0;
 function playNextVideo(currentFileName) {
+    nowTime = Date.now();
+    if (nowTime - playNextVideoTime < 150) {
+        console.log('playNextVideo called too quickly, ignoring.');
+        return;
+    }
+    playNextVideoTime = nowTime;
+    // 检查 DPlayer 实例是否存在
+    if (!dp) {
+        console.error('DPlayer instance not found, falling back to playVideo');
+        playVideo(currentFileName);
+        return;
+    }
+    
     // 找到当前目录下的所有视频文件（从已排序的 currentFiles 中获取）
     const videoFiles = currentFiles.filter(file => !file.is_dir && isVideoFile(file.name));
     
@@ -981,11 +1078,61 @@ function playNextVideo(currentFileName) {
         const nextFile = videoFiles[currentIndex + 1];
         console.log('Auto playing next video:', nextFile.name);
         
-        // 显示一个短暂的提示或加载状态（可选，这里直接切）
-        playVideo(nextFile.name);
+        // 获取下一个视频的下载链接
+        const nextPath = currentPath === '/' ? `/${nextFile.name}` : `${currentPath}/${nextFile.name}`;
+        
+        // 显示加载状态
+        const loadingOverlay = showLoadingOverlay('正在加载下一个视频...');
+        
+        // 获取下一个视频的链接
+        getVideoDownloadUrl(nextPath)
+            .then(({ url: downloadUrl, isM3U8 }) => {
+                if (dp) {
+                    // 移除加载状态
+                    if (loadingOverlay && loadingOverlay.parentNode) {
+                        loadingOverlay.parentNode.removeChild(loadingOverlay);
+                    }
+                    
+                    // 更新当前播放文件和信息
+                    currentPlayFile = nextFile.name;
+                    updateVideoInfo(nextFile.name);
+                    
+                    // 更新播放会话信息
+                    if (currentPlaySession) {
+                        currentPlaySession.path = nextPath;
+                        currentPlaySession.fileName = nextFile.name;
+                    }
+                    currentPlaySession.initialSeekPerformed = false; // 重置标志以允许新的初始跳转
+                    // 使用 DPlayer 的 switchVideo 方法切换视频
+                    dp.switchVideo({
+                        url: downloadUrl, // 直接使用获取到的 URL
+                        type: isM3U8?'auto':'normal',
+                        referrerPolicy: 'no-referrer'
+                    });
+                    dp.play();
+
+                } else {
+                    console.error('DPlayer instance not found');
+                    // 移除加载状态
+                    if (loadingOverlay && loadingOverlay.parentNode) {
+                        loadingOverlay.parentNode.removeChild(loadingOverlay);
+                    }
+                    // 回退到原始方案
+                    playVideo(nextFile.name);
+                }
+            })
+            .catch(error => {
+                console.error('Error getting next video URL:', error);
+                // 移除加载状态
+                if (loadingOverlay && loadingOverlay.parentNode) {
+                    loadingOverlay.parentNode.removeChild(loadingOverlay);
+                }
+                // 回退到原始方案
+                playVideo(nextFile.name);
+            });
     } else {
         console.log('No next video found or last video reached.');
-        // 可选：退出全屏，或者显示播放结束
+        // 可以在这里添加播放结束的逻辑，比如显示结束界面
     }
 }
 
