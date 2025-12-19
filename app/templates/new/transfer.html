@@ -616,7 +616,13 @@ document.addEventListener('DOMContentLoaded', function() {
             if (response.data.success) {
                 // 使用 showToast 替换 alert
                 showToast(response.data.message || '转存任务已成功提交！', 'success');
-                
+                const refreshEvent = new CustomEvent('quarkTransferSuccess', {
+                        detail: {
+                            refreshPath: response.data.refresh_path,
+                            message: '转存成功，媒体库已自动刷新'
+                        }
+                    });
+                window.dispatchEvent(refreshEvent);
                 // 可选：传输成功后取消所有选择
                 // resultsContainer.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => cb.checked = false);
 

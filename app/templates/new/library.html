@@ -471,7 +471,20 @@ function initLibrary() {
     if (selectAllCheckbox) {
         selectAllCheckbox.addEventListener('change', toggleSelectAll);
     }
+    
+    // 添加转存成功事件监听器
+    window.addEventListener('quarkTransferSuccess', handleTransferSuccess);
 }
+
+// 处理转存成功事件
+function handleTransferSuccess(event) {
+    console.log('收到转存成功事件:');
+    
+    // 刷新当前目录
+    loadFileList(currentPath, true);
+}
+
+
 
 
 function loadFileList(path, refresh = false) {
@@ -1150,7 +1163,7 @@ function deleteSelectedFiles() {
         return;
     }
 
-    if (!confirm(`Are you sure you want to delete ${filesToDelete.length} selected items? This action cannot be undone.`)) {
+    if (!confirm(`您确定要删除选中的 ${filesToDelete.length} 个项目吗？此操作无法撤销。`)) {
         return;
     }
 
