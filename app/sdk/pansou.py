@@ -42,7 +42,7 @@ class PanSou:
                 "channels": channels,
                 "plugins": plugins
             }
-            response = self.session.get(url, params=params, timeout=20)
+            response = self.session.get(url, params=params, timeout=30)
             result = response.json()
             if result.get("code") == 0:
                 data = result.get("data", {}).get("merged_by_type", {}).get("quark", [])

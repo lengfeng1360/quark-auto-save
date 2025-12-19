@@ -503,7 +503,7 @@ def get_task_suggestions():
             base_url = base64.b64decode("aHR0cHM6Ly9zLjkxNzc4OC54eXo=").decode()
             url = f"{base_url}/task_suggestions?q={query}&d={deep}"
             try:
-                response = requests.get(url, timeout=10)
+                response = requests.get(url, timeout=20)
                 if response.status_code == 200:
                     return response.json()
             except Exception as e:
