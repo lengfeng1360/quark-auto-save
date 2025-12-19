@@ -17,10 +17,13 @@
         background-color: #0D1117;
         border: 1px solid #30363D;
         border-radius: 6px;
-        padding: 16px;
+        padding: 0 16px 16px; /* 修改上边距为0，其他保持16px */
         color: #C9D1D9;
         flex: 1;
         overflow-y: auto;
+    }
+    .file-explorer > .floating-nav-bar {
+        margin: 0 -16px 16px -16px; /* 导航栏贴合容器顶部 */
     }
     .file-explorer::-webkit-scrollbar {
         width: 8px;
@@ -324,12 +327,24 @@
     .video-info .text-muted {
         color: #8B949E !important;
     }
+    /* 悬浮导航栏样式 */
+    .floating-nav-bar {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        background-color: #161B22; /* 与侧边栏背景色相同 */
+        border-bottom: 1px solid #30363D; /* 添加底部边框 */
+        padding: 12px 16px; /* 调整内边距 */
+        margin: 0 -16px 16px -16px; /* 调整边距，使其贴合容器边界 */
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); /* 添加阴影效果 */
+        backdrop-filter: blur(8px); /* 添加模糊效果 */
+    }
 </style>
 <div class="container-fluid">
     <div class="row">
         <div class="col-md-3 library-sidebar">
             <div class="file-explorer">
-                <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="floating-nav-bar d-flex justify-content-between align-items-center mb-3">
                     <div class="d-flex align-items-center flex-grow-1">
                         <button class="btn btn-sm btn-outline-secondary me-2" id="backBtn" disabled>
                             <i class="bi bi-arrow-left"></i>
@@ -343,7 +358,7 @@
                         <span class="text-muted ms-auto" id="currentPath">/</span>
                     </div>
                 </div>
-                 <div class="d-flex align-items-center mb-2">
+                <div class="d-flex align-items-center mb-2">
                     <input type="checkbox" class="form-check-input me-2" id="selectAllCheckbox">
                     <label for="selectAllCheckbox" class="form-check-label">全选</label>
                 </div>
