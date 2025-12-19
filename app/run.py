@@ -679,20 +679,13 @@ def _get_user_path(path, isAlistpath=False):
     user_info = session.get('user', {})
     
     # 管理员不需要路径前缀处理，直接返回原路径
-    if user_info.get('role') != 'user':
-        return path
+    isAdmin = user_info.get('role') != 'user'
         
     username = user_info.get('username')
     if not username:
         return path
         
-    prefix = ""
-    
-    # --- 优化点：获取单例实例，不再每次 new ---
-    alist = get_alist_client()
-    if alist and alist.is_active and alist.storage_mount_path:
-        prefix = alist.storage_mount_path
-    # ---------------------------------------
+
 
     save_path_default = config_data.get("save_path_default", "")
 
@@ -705,10 +698,24 @@ def _get_user_path(path, isAlistpath=False):
     
 
     final_path = ''
+
     if isAlistpath:
-        final_path = f"{prefix}/{save_path_default}/{username}{path}"
+        prefix = ""
+        # --- 优化点：获取单例实例，不再每次 new ---
+        alist = get_alist_client()
+        if alist and alist.is_active and alist.storage_mount_path:
+            prefix = alist.storage_mount_path
+        # ---------------------------------------
+
+        if isAdmin:
+            final_path = f"{prefix}{path}"
+        else:
+            final_path = f"{prefix}/{save_path_default}/{username}{path}"
     else:
-        final_path = f"{save_path_default}/{username}{path}"
+        if isAdmin:
+            final_path = path
+        else:
+            final_path = f"{save_path_default}/{username}{path}"
         
     return re.sub(r'/{2,}', '/', final_path)
 
@@ -1053,12 +1060,18 @@ def get_fs_qklist():
 
         data = request.json
         raw_path = data.get("path", "/")
-        
+        logging.info(f"Listing raw_path: {raw_path}")
+
         # 2. 获取真实路径
         # 注意：这里 isAlistpath 设为 False，因为我们直接操作夸克网盘，不需要 Alist 的挂载前缀
         path = _get_user_path(raw_path, isAlistpath=False)
-        logging.info(f"Listing Quark path: {path}")
 
+        ## 规范化路径，处理多余的斜杠.夸克不能斜杆结尾.不然找不到路径
+
+        if path != "/"  and path.endswith('/'):
+            path = path[:-1]
+
+        logging.info(f"Listing Quark path: {path}")
         # 3. 将路径转换为 fid (File ID)
         target_fid = "0" # 默认为根目录
         if path != "/":
@@ -1067,6 +1080,7 @@ def get_fs_qklist():
             if fids_res:
                 target_fid = fids_res[0]["fid"]
             else:
+                logging.info("路径不存在，返回空列表，模仿 Alist 行为")
                 # 路径不存在，返回空列表，模仿 Alist 行为
                 return jsonify({
                     "success": True, 
