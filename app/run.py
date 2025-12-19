@@ -958,13 +958,15 @@ def get_storage_info():
         return jsonify({"success": False, "message": "未登录"})
     
     try:
-        alist_config = config_data.get("plugins", {}).get("alist", {})
-        if not alist_config.get("url") or not alist_config.get("token"):
+        # 优化点：使用 helper 获取 Alist 单例
+        alist_client = get_alist_client()
+        if not alist_client:
             return jsonify({"success": False, "message": "Alist 未配置"})
         
-        # 获取存储信息
-        url = f"{alist_config['url']}/api/admin/storage/list"
-        headers = {"Authorization": alist_config['token']}
+        # 获取存储信息 (使用 client.url 和 client.token)
+        url = f"{alist_client.url}/api/admin/storage/list"
+        headers = {"Authorization": alist_client.token}
+        
         logging.info(f"Getting storage info from: {url}")
         response = requests.get(url, headers=headers)
         logging.info(f"Storage info response status: {response.status_code}")
@@ -997,7 +999,7 @@ def get_storage_info():
         return jsonify({"success": False, "message": str(e)})
 
 #alist 获取文件列表
-@app.route("/api/library/fs/list", methods=["POST"])
+# @app.route("/api/library/fs/list", methods=["POST"])
 def get_fs_list():
     if not is_login():
         return jsonify({"success": False, "message": "未登录"})
@@ -1141,13 +1143,14 @@ def get_file_info():
         path = _get_user_path(path,True)
         password = data.get("password", "")
         
-        alist_config = config_data.get("plugins", {}).get("alist", {})
-        if not alist_config.get("url") or not alist_config.get("token"):
+        # 优化点：使用 helper 获取 Alist 单例
+        alist_client = get_alist_client()
+        if not alist_client:
             return jsonify({"success": False, "message": "Alist 未配置"})
         
         # 获取文件信息
-        url = f"{alist_config['url']}/api/fs/get"
-        headers = {"Authorization": alist_config['token']}
+        url = f"{alist_client.url}/api/fs/get"
+        headers = {"Authorization": alist_client.token}
         payload = {
             "path": path,
             "password": password,
@@ -1180,13 +1183,14 @@ def get_download_url():
         # 根据用户角色调整路径
         path = _get_user_path(path,True)
 
-        alist_config = config_data.get("plugins", {}).get("alist", {})
-        if not alist_config.get("url") or not alist_config.get("token"):
+        # 优化点：使用 helper 获取 Alist 单例
+        alist_client = get_alist_client()
+        if not alist_client:
             return jsonify({"success": False, "message": "Alist 未配置"})
         
         # 首先使用 POST 方法获取文件信息，包含 raw_url
-        get_url = f"{alist_config['url']}/api/fs/get"
-        headers = {"Authorization": alist_config['token']}
+        get_url = f"{alist_client.url}/api/fs/get"
+        headers = {"Authorization": alist_client.token}
         payload = {
             "path": path,
             "password": ""
@@ -1205,7 +1209,7 @@ def get_download_url():
                     return jsonify({"success": True, "data": {"download_url": raw_url}})
                 else:
                     # 如果没有 raw_url，尝试使用下载接口
-                    download_url = f"{alist_config['url']}/api/fs/download"
+                    download_url = f"{alist_client.url}/api/fs/download"
                     params = {"path": path}
                     
                     logging.info(f"Getting download URL from: {download_url}")
