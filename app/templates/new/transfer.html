@@ -104,6 +104,41 @@
              display: block;
              min-height: auto;
          }
+         
+         /* Toast animations to fix flashing issue */
+         .toast-container .toast {
+             animation: fadeIn 0.3s ease-out;
+             position: relative; /* 确保 toast 保持在固定位置 */
+             margin-bottom: 0.5rem; /* 在每个 toast 之间添加间距 */
+         }
+         
+         @keyframes fadeIn {
+             from { opacity: 0; transform: translateY(10px); }
+             to { opacity: 1; transform: translateY(0); }
+         }
+         
+         .toast-container .toast.fade:not(.show) {
+             opacity: 0;
+             animation: fadeOut 0.3s ease-out forwards; /* 使用 forwards 保持结束状态 */
+         }
+         
+         @keyframes fadeOut {
+             from { opacity: 1; transform: translateY(0); }
+             to { opacity: 0; transform: translateY(10px); }
+         }
+         
+         /* 防止 toast 容器滚动或变形 */
+         .toast-container {
+             pointer-events: none; /* 防止容器拦截鼠标事件 */
+             position: fixed !important; /* 确保使用固定定位，不受父元素影响 */
+             overflow: visible; /* 确保内容可见 */
+         }
+         
+         .toast-container .toast {
+             pointer-events: auto; /* 但允许 toast 本身接收事件（如关闭按钮） */
+             /* 确保 toast 在容器中有固定位置 */
+             position: relative;
+         }
      </style>
 
 <div class="container mt-4">
@@ -155,9 +190,13 @@
                     </div>
                 </div>
             
-                <!-- Toast Container for notifications -->
-                <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1100;">
-                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container for notifications - 移出 card 外部，避免受 card 事件影响 -->
+    <div class="toast-container position-fixed bottom-0 start-0 p-3 mb-4 ms-4" style="z-index: 1100;">
+    </div>
             </div>
         </div>
     </div>
@@ -530,7 +569,8 @@ document.addEventListener('DOMContentLoaded', function() {
      * @param {'success'|'danger'} type - 通知类型 (成功或失败)
      */
     const showToast = (message, type = 'success') => {
-        const toastContainer = document.querySelector('.toast-container');
+        // 确保 toast 容器始终存在
+        let toastContainer = document.querySelector('.toast-container');
         if (!toastContainer) {
             console.error("Toast container not found!");
             alert(message); // 降级为 alert
@@ -542,7 +582,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const iconClass = type === 'success' ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill';
 
         const toastHTML = `
-            <div id="${toastId}" class="toast align-items-center text-white ${bgClass} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+            <div id="${toastId}" class="toast align-items-center text-white ${bgClass} border-0" role="alert" aria-live="assertive" aria-atomic="true" style="min-width: 300px;">
                 <div class="d-flex">
                     <div class="toast-body">
                         <i class="bi ${iconClass} me-2"></i>${message}
@@ -552,7 +592,7 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         `;
         
-        toastContainer.insertAdjacentHTML('beforeend', toastHTML);
+        toastContainer.insertAdjacentHTML('afterbegin', toastHTML); // 使用 afterbegin 确保新 toast 在最前面
         const toastElement = document.getElementById(toastId);
         const toast = new bootstrap.Toast(toastElement, { delay: 5000 }); // 5秒后自动消失
         toast.show();
@@ -560,6 +600,11 @@ document.addEventListener('DOMContentLoaded', function() {
         // Toast 隐藏后从 DOM 中移除，避免页面堆积
         toastElement.addEventListener('hidden.bs.toast', () => {
             toastElement.remove();
+            
+            // 检查是否有其他 toast，如果没有则确保容器保持其固定位置属性
+            if (toastContainer.children.length === 0) {
+                // 容器保持原样，不需要额外操作
+            }
         });
     };
 
