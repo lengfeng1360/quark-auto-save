@@ -82,10 +82,29 @@
         background: #6c757d;
     }
     /* 防止按钮文字换行 */
-    #transferButton {
-        white-space: nowrap;
-    }
-</style>
+         #transferButton {
+             white-space: nowrap;
+         }
+         
+         /* 错误消息样式 */
+         #errorMessageContainer {
+             z-index: 1050; /* 确保错误消息在其他元素之上 */
+             position: relative;
+         }
+         
+         #transferErrorMessage {
+             background-color: #dc3545; /* Bootstrap danger color */
+             color: white !important;
+             border: 1px solid rgba(220, 53, 69, 0.5); /* Danger color with transparency */
+             border-radius: 0.375rem;
+             padding: 0.75rem 1.25rem;
+             margin-bottom: 1rem;
+             text-align: center;
+             font-weight: 500;
+             display: block;
+             min-height: auto;
+         }
+     </style>
 
 <div class="container mt-4">
     <!-- Input Card Section -->
@@ -111,11 +130,11 @@
     </div>
 
     <!-- Error Message -->
-    <div id="errorMessageContainer" class="row justify-content-center mt-4" style="display: none;">
-        <div class="col-md-6">
-            <div id="errorMessage" class="alert alert-danger" role="alert"></div>
+        <div id="errorMessageContainer" class="row justify-content-center mt-4" style="display: none; position: relative; z-index: 1050;">
+            <div class="col-lg-8 mx-auto">
+                <div id="transferErrorMessage" class="text-center p-3" role="alert">发生错误</div>
+            </div>
         </div>
-    </div>
 
     <!-- Results Section -->
     <div id="transferResultsSection" class="row justify-content-center mt-4" style="display: none;">
@@ -134,6 +153,10 @@
                         <input type="text" class="form-control bg-dark text-white border-secondary" id="savePathInput" placeholder="/ (根目录) 或 /我的文件夹" value="/">
                         <button id="transferButton" class="btn btn-success" type="button" style="display: none;"><i class="bi bi-cloud-download"></i> 转存</button>
                     </div>
+                </div>
+            
+                <!-- Toast Container for notifications -->
+                <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1100;">
                 </div>
             </div>
         </div>
@@ -197,7 +220,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const analyzeButton = document.getElementById('analyzeButton');
     const shareLinkTextarea = document.getElementById('shareLink');
     const loadingSpinner = document.getElementById('loadingSpinner');
-    const errorMessage = document.getElementById('errorMessage');
+    const transferErrorMessage = document.getElementById('transferErrorMessage');
     const resultsContainer = document.getElementById('transferResultsContainer');
 
     const transferButton = document.getElementById('transferButton');
@@ -207,7 +230,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const analyzeAndFetch = () => {
         const shareUrl = shareLinkTextarea.value.trim();
         if (!shareUrl) {
-            errorMessage.textContent = '请粘贴分享链接。';
+            transferErrorMessage.textContent = '请粘贴分享链接。';
             document.getElementById('errorMessageContainer').style.display = 'block';
             return;
         }
@@ -243,7 +266,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     transferButton.style.display = 'none';
                     // Try to get error message from different possible fields
                     const errorMsg = response.data.data?.error || response.data.message || '无法解析链接。';
-                    errorMessage.textContent = errorMsg;
+                    transferErrorMessage.textContent = errorMsg;
                     document.getElementById('errorMessageContainer').style.display = 'block';
                 }
             })
@@ -256,7 +279,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else if (error.message) {
                      msg += ' ' + error.message;
                 }
-                errorMessage.textContent = msg;
+                transferErrorMessage.textContent = msg;
                 document.getElementById('errorMessageContainer').style.display = 'block';
             });
     };
