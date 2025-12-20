@@ -164,7 +164,98 @@ document.addEventListener('DOMContentLoaded', function () {
     const loadingSpinner = document.getElementById('loadingSpinner');
     const errorMessage = document.getElementById('errorMessage');
 
-    const performSearch = () => {
+    // PanSou 搜索函数
+    function pansouSearch(query) {
+        // 使用默认 PanSou 服务器或从配置获取
+        // 如果需要可配置，可以从全局变量或配置中获取
+        
+        const pansouServer = window.PANSOU_SERVER_URL || "https://so.252035.xyz"; // 默认服务器
+        
+        return axios.get(`${pansouServer}/api/search`, {
+            params: {
+                kw: query,
+                cloud_types: ["quark"],
+                res: "merge",
+                refresh: false,
+                src: "all"
+            }
+        })
+        .then(response => {
+            if (response.data.code === 0) {
+                const data = response.data.data.merged_by_type.quark || [];
+                return formatPansouResults(data);
+            }
+            return [];
+        })
+        .catch(error => {
+            console.error('PanSou search error:', error);
+            return [];
+        });
+    }
+
+    // 格式化 PanSou 结果函数
+    function formatPansouResults(data) {
+        // 模拟后端 format_search_results 方法的逻辑
+        const pattern = /^(.*?)(?:【(?:简介|介绍|描述)】?[:：]?(.*))?$/;
+        const formatResults = [];
+        const linkArray = [];
+        
+        for (const item of data) {
+            const url = item.url || "";
+            const note = item.note || "";
+            const tm = item.datetime || "";
+            
+            // 使用正则表达式匹配标题和内容
+            const match = note.match(pattern);
+            let title, content;
+            
+            if (match) {
+                title = match[1];
+                content = match[2] || "";
+            } else {
+                title = note;
+                content = "";
+            }
+
+            if (url !== "" && !linkArray.includes(url)) {
+                linkArray.push(url);
+                formatResults.push({
+                    shareurl: url,
+                    taskname: title,
+                    content: content,
+                    datetime: tm,
+                    channel: item.source || item.channel || "",
+                    source: "PanSou"
+                });
+            }
+        }
+        
+        return formatResults;
+    }
+
+    // 去重和排序函数
+    function deduplicateAndSortResults(results) {
+        const linkArray = [];
+        const uniqueResults = [];
+        
+        results.sort((a, b) => {
+            const dateA = a.datetime || "";
+            const dateB = b.datetime || "";
+            return dateB.localeCompare(dateA);
+        });
+        
+        for (const item of results) {
+            const url = item.shareurl || "";
+            if (url !== "" && !linkArray.includes(url)) {
+                linkArray.push(url);
+                uniqueResults.push(item);
+            }
+        }
+        
+        return uniqueResults;
+    }
+
+    const performSearch = async () => {
         const query = searchInput.value.trim();
         if (query === '') {
             errorMessage.textContent = '请输入搜索词。';
@@ -176,27 +267,173 @@ document.addEventListener('DOMContentLoaded', function () {
         resultsContainer.innerHTML = '';
         errorMessage.style.display = 'none';
 
-        axios.get('/task_suggestions', {
-            params: {
-                q: query,
-                d: 1 
+        // 创建一个Map来跟踪已经显示的URL及其对应DOM元素，用于去重
+        const displayedUrls = new Map();
+        let hasResults = false;
+        let allResults = [];
+
+        // 创建一个辅助函数来重新排序显示的元素
+        const reSortDisplay = () => {
+            // 从结果中排序
+            allResults.sort((a, b) => {
+                const dateA = b.datetime || "";
+                const dateB = a.datetime || "";
+                return dateA.localeCompare(dateB);
+            });
+            
+            // 重新渲染所有元素
+            resultsContainer.innerHTML = '';
+            for (const item of allResults) {
+                // 为每个结果创建DOM元素
+                const card = document.createElement('div');
+                card.className = 'card';
+                
+                const cardBody = document.createElement('div');
+                cardBody.className = 'card-body';
+
+                const title = document.createElement('h5');
+                title.className = 'card-title';
+                const titleLink = document.createElement('a');
+                titleLink.href = item.shareurl;
+                titleLink.target = '_blank';
+                titleLink.textContent = item.taskname;
+                title.appendChild(titleLink);
+
+                const description = document.createElement('p');
+                description.className = 'card-text small';
+                const fullDescription = item.content || '暂无描述。';
+                description.textContent = fullDescription;
+                description.setAttribute('data-bs-toggle', 'tooltip');
+                description.setAttribute('data-bs-placement', 'bottom');
+                description.setAttribute('title', fullDescription);
+
+                const footer = document.createElement('div');
+                footer.className = 'card-footer bg-transparent border-top-0';
+                
+                const badges = document.createElement('div');
+
+                const sourceBadge = document.createElement('span');
+                sourceBadge.className = 'badge bg-success me-1';
+                sourceBadge.textContent = item.source || '网络';
+                
+                const channelBadge = document.createElement('span');
+                channelBadge.className = 'badge bg-info me-1';
+                channelBadge.textContent = item.channel || '未知';
+                
+                badges.appendChild(sourceBadge);
+                badges.appendChild(channelBadge);
+
+                const transferButton = document.createElement('button');
+                transferButton.className = 'btn btn-sm btn-outline-light';
+                transferButton.innerHTML = '<i class="bi bi-send-plus"></i>';
+                transferButton.title = '发送到下载';
+                transferButton.onclick = () => {
+                    localStorage.setItem('shareUrlToTransfer', item.shareurl);
+                    const navLink = document.querySelector('a.nav-link[data-page="transfer"]');
+                    if (navLink) {
+                        navLink.click();
+                        // Scroll to top
+                        window.scrollTo(0, 0);
+                    }
+                };
+                
+                cardBody.appendChild(title);
+                cardBody.appendChild(description);
+                footer.appendChild(badges);
+                footer.appendChild(transferButton);
+                card.appendChild(cardBody);
+                card.appendChild(footer);
+
+                resultsContainer.appendChild(card);
             }
-        })
-        .then(response => {
-            loadingSpinner.style.display = 'none';
-            if (response.data.success && response.data.data.length > 0) {
-                renderResults(response.data.data);
-            } else {
+            
+            // 初始化工具提示
+            const tooltipTriggerList = Array.from(resultsContainer.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            tooltipTriggerList.forEach(tooltipTriggerEl => {
+                new bootstrap.Tooltip(tooltipTriggerEl);
+            });
+        };
+
+        try {
+            // 同时发起两个请求，并在每个请求完成时立即处理结果
+            await Promise.allSettled([
+                // 处理原始搜索结果
+                axios.get('/task_suggestions', {
+                    params: { q: query, d: 1 }
+                })
+                .then(originalResult => {
+                    if (originalResult.data.success && originalResult.data.data) {
+                        const newResults = originalResult.data.data.filter(item =>
+                            item.shareurl && !displayedUrls.has(item.shareurl)
+                        );
+                        
+                        if (newResults.length > 0) {
+                            // 添加新结果
+                            newResults.forEach(item => {
+                                displayedUrls.set(item.shareurl, item);
+                                allResults.push(item);
+                            });
+                            
+                            hasResults = true;
+                            
+                            // 重新排序和显示
+                            reSortDisplay();
+                            
+                            // 确保发现头被折叠
+                            const discoveryHeader = document.getElementById('discoveryHeader');
+                            if (discoveryHeader && !discoveryHeader.classList.contains('collapsed')) {
+                                discoveryHeader.classList.add('collapsed');
+                            }
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.warn('原始搜索请求失败:', error);
+                }),
+                
+                // 处理 PanSou 搜索结果
+                pansouSearch(query)
+                .then(pansouResults => {
+                    const newResults = pansouResults.filter(item =>
+                        item.shareurl && !displayedUrls.has(item.shareurl)
+                    );
+                    
+                    if (newResults.length > 0) {
+                        // 添加新结果
+                        newResults.forEach(item => {
+                            displayedUrls.set(item.shareurl, item);
+                            allResults.push(item);
+                        });
+                        
+                        hasResults = true;
+                        
+                        // 重新排序和显示
+                        reSortDisplay();
+                        
+                        // 确保发现头被折叠
+                        const discoveryHeader = document.getElementById('discoveryHeader');
+                        if (discoveryHeader && !discoveryHeader.classList.contains('collapsed')) {
+                            discoveryHeader.classList.add('collapsed');
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.warn('PanSou 搜索请求失败:', error);
+                })
+            ]);
+
+            // 所有请求完成后，如果仍然没有结果，则显示错误信息
+            if (!hasResults) {
                 errorMessage.textContent = '未找到结果。';
                 errorMessage.style.display = 'block';
             }
-        })
-        .catch(error => {
-            loadingSpinner.style.display = 'none';
+        } catch (error) {
             console.error('Error fetching search results:', error);
             errorMessage.textContent = '获取结果时发生错误。';
             errorMessage.style.display = 'block';
-        });
+        } finally {
+            loadingSpinner.style.display = 'none';
+        }
     };
 
     const renderResults = (results) => {
