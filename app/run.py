@@ -1494,7 +1494,7 @@ def call_ai_service():
             "model": model,
             "messages": [
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": files}
+                {"role": "user", "content": "".join(files)}
             ],
             "temperature": 0.3
         }
