@@ -292,6 +292,39 @@
               </div>
             </div>
 
+            <div class="row title" title="AI服务配置，用于智能排序等功能">
+              <div class="col-10">
+                <h2 style="display: inline-block;"><i class="bi bi-cpu"></i> AI服务</h2>
+              </div>
+            </div>
+            <div class="form-group row mb-0" style="display:flex; align-items:center;">
+              <div data-toggle="collapse" data-target="#collapse_ai_service" aria-expanded="true" aria-controls="collapse_ai_service">
+                <div class="btn btn-block text-left">
+                  <i class="bi bi-caret-right-fill"></i> AI服务配置
+                </div>
+              </div>
+            </div>
+            <div class="collapse show ml-3" id="collapse_ai_service">
+              <div class="form-group row">
+                <label class="col-sm-2 col-form-label">API密钥</label>
+                <div class="col-sm-10">
+                  <input type="password" v-model="formData.ai_service.api_key" class="form-control" placeholder="OpenAI API密钥">
+                </div>
+              </div>
+              <div class="form-group row">
+                <label class="col-sm-2 col-form-label">基础URL</label>
+                <div class="col-sm-10">
+                  <input type="text" v-model="formData.ai_service.base_url" class="form-control" placeholder="API基础URL，如 https://api.openai.com/v1">
+                </div>
+              </div>
+              <div class="form-group row">
+                <label class="col-sm-2 col-form-label">模型</label>
+                <div class="col-sm-10">
+                  <input type="text" v-model="formData.ai_service.model" class="form-control" placeholder="AI模型，如 gpt-3.5-turbo">
+                </div>
+              </div>
+            </div>
+
           </div>
 
           <div v-if="activeTab === 'tasklist'">
@@ -652,6 +685,12 @@
               plugins: ""
             }
           },
+          ai_service: {
+            api_key: "",
+            base_url: "https://api.openai.com/v1",
+            model: "gpt-3.5-turbo",
+            timeout: 30
+          },
         },
         newTask: {
           taskname: "",
@@ -796,6 +835,14 @@
               if (!config_data.source.net) {
                 config_data.source.net = {
                   enable: ""
+                };
+              }
+              if (!config_data.ai_service) {
+                config_data.ai_service = {
+                  api_key: "",
+                  base_url: "https://api.openai.com/v1",
+                  model: "gpt-3.5-turbo",
+                  timeout: 30
                 };
               }
               if (!config_data.save_path_default) {

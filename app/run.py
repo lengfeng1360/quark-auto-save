@@ -30,6 +30,8 @@ import secrets
 import sys
 import os
 import re
+from datetime import datetime
+from collections import defaultdict
 
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, parent_dir)
@@ -1410,6 +1412,133 @@ def delete_fs_items():
         logging.error(f"删除操作异常: {str(e)}")
         logging.error(traceback.format_exc())
         return jsonify({"success": False, "message": f"服务端异常: {str(e)}"})
+
+# AI排序相关函数
+COMPREHENSIVE_AI_SORT_PROMPT = """
+你是一个视频文件排序专家，请分析以下视频文件列表并生成排序规则。
+
+分析要求：
+1. 识别所有不同的文件命名模式和规律
+2. 处理混合命名模式（如数字序号、中英文集数、季集标识等）
+3. 为每种模式生成对应的排序规则
+4. 确保规则能正确处理各种边界情况
+5. 规则应适用于整个文件集
+
+请返回JSON格式结果：
+{
+  "analysis": "对文件命名模式和混合情况的全面分析",
+  "filePatterns": [
+    {
+      "patternName": "模式名称",
+      "description": "模式描述",
+      "sampleFiles": ["符合此模式的示例文件"],
+      "count": 10
+    }
+  ],
+  "sortingStrategy": "统一排序|分组排序|混合排序",
+  "sortingRules": [
+    {
+      "ruleName": "规则名称",
+      "description": "规则描述",
+      "type": "regex|extract|compare",
+      "priority": 1,
+      "pattern": "正则表达式或提取模式",
+      "extractKey": "提取的键名",
+      "sortOrder": "asc|desc",
+      "dataType": "number|string|date|tuple",
+      "confidence": 0.9,
+      "applicablePatterns": ["适用的文件模式列表"]
+    }
+  ],
+  "fallbackRules": [当主规则不匹配时使用的备选规则],
+  "alternativeRules": [2-3种备选规则集]
+}
+
+常见混合模式示例：
+- 纯数字序号：01.mp4, 02.mp4, 03.mp4
+- 中英混合：第一集.mp4, 第2集.mp4, E03.mp4
+- 季集标识：S01E01.mp4, Season 2 Episode 3.mp4, 第1季第4集.mp4
+- 日期命名：2023-01-15.mp4, 2023.01.16.mp4
+- 电影系列：Movie.Part1.mp4, Movie Part II.mp4, 电影(中).mp4
+"""
+
+@app.route("/api/library/comprehensive-ai-sort", methods=["POST"])
+def call_ai_service():
+    if not is_login():
+        return jsonify({"success": False, "message": "未登录"})
+    
+    """
+    调用AI服务获取排序规则
+    """
+    try:
+        data = request.json
+        files = data.get("files", [])
+        path = data.get("path", "/")
+        prompt = COMPREHENSIVE_AI_SORT_PROMPT
+        ai_config = config_data.get("ai_service", {})
+        api_key = ai_config.get("api_key", "")
+        base_url = ai_config.get("base_url", "https://api.openai.com/v1")
+        model = ai_config.get("model", "gpt-3.5-turbo")
+        timeout = ai_config.get("timeout", 30)
+        
+        if not api_key:
+            logging.warning("AI服务未配置API密钥")
+            return {"success": False, "message": "AI服务未配置API密钥"}
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": files}
+            ],
+            "temperature": 0.3
+        }
+        
+        response = requests.post(
+            f"{base_url}/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=timeout
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            
+            # 尝试解析JSON
+            try:
+                # 提取JSON部分（处理可能的额外文本）
+                import json
+                start_idx = content.find("{")
+                end_idx = content.rfind("}") + 1
+                if start_idx != -1 and end_idx > start_idx:
+                    json_str = content[start_idx:end_idx]
+                    rules_data = json.loads(json_str)
+                    return {"success": True, "data": rules_data}
+                else:
+                    return {"success": False, "message": "AI返回的内容中未找到有效的JSON"}
+            except json.JSONDecodeError as e:
+                logging.error(f"解析AI返回的JSON失败: {str(e)}")
+                return {"success": False, "message": f"解析AI返回的JSON失败: {str(e)}"}
+        else:
+            error_msg = f"AI服务请求失败: {response.status_code} - {response.text}"
+            logging.error(error_msg)
+            return {"success": False, "message": error_msg}
+            
+    except requests.exceptions.Timeout:
+        error_msg = "AI服务请求超时"
+        logging.error(error_msg)
+        return {"success": False, "message": error_msg}
+    except Exception as e:
+        error_msg = f"调用AI服务异常: {str(e)}"
+        logging.error(error_msg)
+        return {"success": False, "message": error_msg}
+
 
 # 添加任务接口
 @app.route("/api/add_task", methods=["POST"])
