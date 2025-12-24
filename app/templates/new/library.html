@@ -481,7 +481,7 @@ function initLibrary() {
     }
     libraryInitialized = true;
     console.log('Initializing library...');
-    // loadStorageInfo();
+    loadSortSettings(); // 加载排序设置
     loadPlayerSettings(); // 加载播放器设置
     loadFileList(currentPath);
     
@@ -519,15 +519,8 @@ function setupSortTypeDropdown() {
             e.preventDefault();
             const sortType = this.getAttribute('data-sort');
             fileSorter.setSortType(sortType);
-            
-            // 更新按钮文本
-            const btn = document.getElementById('sortTypeDropdown');
-            const sortNames = {
-                'name': '按名称排序',
-                'structure': '按结构排序',
-                'episode': '按集号排序'
-            };
-            btn.innerHTML = `<i class="bi bi-sort-down"></i> ${sortNames[sortType]}`;
+            saveSortSettings(sortType); // 保存排序设置到本地存储
+            updateSortButton(sortType); // 更新按钮文本
             
             // 重新排序并显示
             if (currentFiles && currentFiles.length > 0) {
@@ -1088,6 +1081,42 @@ function playVideo(fileName) {
 }
 
 
+
+// 排序方式名称映射
+const sortTypeNames = {
+    'name': '按名称排序',
+    'structure': '按结构排序',
+    'episode': '按集号排序'
+};
+
+// 更新排序按钮文本
+function updateSortButton(sortType) {
+    const btn = document.getElementById('sortTypeDropdown');
+    if (btn) {
+        btn.innerHTML = `<i class="bi bi-sort-down"></i> ${sortTypeNames[sortType] || sortTypeNames['name']}`;
+    }
+}
+
+// 加载排序设置
+function loadSortSettings() {
+    const saved = localStorage.getItem('quark_library_sort');
+    if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            if (parsed.sortType && ['name', 'structure', 'episode'].includes(parsed.sortType)) {
+                fileSorter.setSortType(parsed.sortType);
+                updateSortButton(parsed.sortType);
+            }
+        } catch (e) {
+            console.error('Failed to parse sort settings', e);
+        }
+    }
+}
+
+// 保存排序设置
+function saveSortSettings(sortType) {
+    localStorage.setItem('quark_library_sort', JSON.stringify({ sortType: sortType }));
+}
 
 function loadPlayerSettings() {
     const saved = localStorage.getItem('quark_player_settings');
