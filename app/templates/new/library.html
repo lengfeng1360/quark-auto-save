@@ -1,15 +1,15 @@
 <style>
     .library-sidebar {
         background-color: #161B22;
-        padding: 20px;
-        height: 800px;
+        padding: 10px 20px 30px 20px;
+        height: calc(100vh - 50px);
         border-right: 1px solid #30363D;
         display: flex;
         flex-direction: column;
     }
     .library-content {
         padding: 20px;
-        height: 100%;
+        height: calc(100vh - 50px);
         background-color: #0D1117;
         overflow-y: auto;
     }
@@ -338,6 +338,14 @@
         margin: 0 -16px 16px -16px; /* 调整边距，使其贴合容器边界 */
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); /* 添加阴影效果 */
         backdrop-filter: blur(8px); /* 添加模糊效果 */
+    }
+    /* 重置 .row 的上边距 */
+    /* .container-fluid > .row {
+        margin-top: 0 !important;
+    } */
+    /* 设置 .container-fluid 的内边距为 10px */
+    .container-fluid {
+        padding: 4px !important;
     }
 </style>
 <div class="container-fluid">
@@ -1444,3 +1452,4 @@ function displayFileGrid(files) {
     contentArea.innerHTML = html;
 }
 </script>
+
