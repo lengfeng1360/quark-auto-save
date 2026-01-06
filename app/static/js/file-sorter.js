@@ -81,7 +81,7 @@ class FileSorter {
         const videoNames = videoFiles.map(f => f.name);
         
         if (videoNames.length === 0) {
-            return this.sortByName(fileList, context);
+            return this.sortByName(fileList);
         }
 
         // 按结构相似度分组
