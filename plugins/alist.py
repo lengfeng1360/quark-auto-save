@@ -180,3 +180,37 @@ class Alist:
         except Exception as e:
             print(f"Alist刷新: 获取Quark路径出错 {e}")
         return ""
+
+    def disable_storage(self):
+        url = f"{self.url}/api/admin/storage/disable"
+        headers = {"Authorization": self.token}
+        querystring = {"id": self.storage_id}
+        try:
+            response = requests.request("POST", url, headers=headers, params=querystring)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("code") == 200:
+                print(f"Alist存储: 已禁用挂载 [{self.storage_id}] ✅")
+                return True
+            else:
+                print(f"Alist存储: 禁用挂载失败❌ {data.get('message')}")
+        except Exception as e:
+            print(f"Alist存储: 禁用挂载出错 {e}")
+        return False
+
+    def enable_storage(self):
+        url = f"{self.url}/api/admin/storage/enable"
+        headers = {"Authorization": self.token}
+        querystring = {"id": self.storage_id}
+        try:
+            response = requests.request("POST", url, headers=headers, params=querystring)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("code") == 200:
+                print(f"Alist存储: 已启用挂载 [{self.storage_id}] ✅")
+                return True
+            else:
+                print(f"Alist存储: 启用挂载失败❌ {data.get('message')}")
+        except Exception as e:
+            print(f"Alist存储: 启用挂载出错 {e}")
+        return False
