@@ -15,6 +15,7 @@ class Alist:
     # 缓存参数
     storage_mount_path = None
     quark_root_dir = None
+    numeric_storage_id = None  # 存储的数字ID，用于 disable/enable 操作
 
     def __init__(self, **kwargs):
         if kwargs:
@@ -71,8 +72,11 @@ class Alist:
             if file_list.get("code") != 200:
                 print(f"Alist刷新: 获取挂载路径失败❌ {file_list.get('message')}")
                 return False, (None, None)
+            # 获取数字存储ID用于后续disable/enable操作
+            self.numeric_storage_id = self.get_storage_id_by_mount_path(storage_mount_path)
         # 2. 检查是否数字，调用 Alist API 获取存储信息
         elif re.match(r"^\d+$", storage_id):
+            self.numeric_storage_id = storage_id
             if storage_info := self.get_storage_info(storage_id):
                 if storage_info["driver"] == "Quark":
                     addition = json.loads(storage_info["addition"])
@@ -95,6 +99,33 @@ class Alist:
             return True, (storage_mount_path, quark_root_dir)
         else:
             return False, (None, None)
+
+    def get_storage_id_by_mount_path(self, mount_path):
+        """
+        根据挂载路径获取存储的数字 ID
+        Args:
+            mount_path: 存储的挂载路径 (如 /quarktv)
+        Returns:
+            str: 数字存储 ID，未找到返回 None
+        """
+        url = f"{self.url}/api/admin/storage/list"
+        headers = {"Authorization": self.token}
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("code") == 200:
+                for storage in data.get("data", {}).get("content", []):
+                    if storage.get("mount_path") == mount_path:
+                        storage_id_num = str(storage.get("id"))
+                        print(f"Alist刷新: 找到存储 [{mount_path}] 的数字ID: {storage_id_num}")
+                        return storage_id_num
+            else:
+                print(f"Alist刷新: 获取存储列表失败❌ {data.get('message')}")
+        except Exception as e:
+            print(f"Alist刷新: 获取存储列表失败 {e}")
+        print(f"Alist刷新: 未找到挂载路径为 [{mount_path}] 的存储")
+        return None
 
     def get_storage_info(self, storage_id):
         url = f"{self.url}/api/admin/storage/get"
@@ -184,7 +215,12 @@ class Alist:
     def disable_storage(self):
         url = f"{self.url}/api/admin/storage/disable"
         headers = {"Authorization": self.token}
-        querystring = {"id": self.storage_id}
+        # 使用数字存储ID，如果不存在则使用原始storage_id
+        storage_id_to_use = self.numeric_storage_id if self.numeric_storage_id else self.storage_id
+        if not re.match(r"^\d+$", storage_id_to_use):
+            print(f"Alist存储: 禁用挂载失败❌ 无法获取有效的数字存储ID (当前: {storage_id_to_use})")
+            return False
+        querystring = {"id": storage_id_to_use}
         try:
             response = requests.request("POST", url, headers=headers, params=querystring)
             response.raise_for_status()
@@ -201,7 +237,12 @@ class Alist:
     def enable_storage(self):
         url = f"{self.url}/api/admin/storage/enable"
         headers = {"Authorization": self.token}
-        querystring = {"id": self.storage_id}
+        # 使用数字存储ID，如果不存在则使用原始storage_id
+        storage_id_to_use = self.numeric_storage_id if self.numeric_storage_id else self.storage_id
+        if not re.match(r"^\d+$", storage_id_to_use):
+            print(f"Alist存储: 启用挂载失败❌ 无法获取有效的数字存储ID (当前: {storage_id_to_use})")
+            return False
+        querystring = {"id": storage_id_to_use}
         try:
             response = requests.request("POST", url, headers=headers, params=querystring)
             response.raise_for_status()
