@@ -94,6 +94,7 @@ app.jinja_env.variable_start_string = "[["
 app.jinja_env.variable_end_string = "]]"
 
 scheduler = BackgroundScheduler()
+background_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="alist_refresh_")
 logging.basicConfig(
     level=logging.DEBUG if DEBUG else logging.INFO,
     format="[%(asctime)s][%(levelname)s] %(message)s",
@@ -1147,9 +1148,20 @@ def get_fs_qklist():
 
         data = request.json
         raw_path = data.get("path", "/")
-        logging.info(f"Listing raw_path: {raw_path}")
+        refresh = data.get("refresh", False)
 
-        # 2. 获取真实路径
+        logging.info(f"Listing raw_path: {raw_path}, refresh: {refresh}")
+
+        # 2. 当 refresh=True 时，异步触发 Alist 刷新（不等待结果）
+        if refresh:
+            # 使用 copy_current_request_context 复制当前请求上下文到后台线程
+            from flask import copy_current_request_context
+            @copy_current_request_context
+            def call_get_fs_list():
+                return get_fs_list()
+            background_executor.submit(call_get_fs_list)
+
+        # 3. 获取真实路径
         # 注意：这里 isAlistpath 设为 False，因为我们直接操作夸克网盘，不需要 Alist 的挂载前缀
         path = _get_user_path(raw_path, isAlistpath=False)
 
