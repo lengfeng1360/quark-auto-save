@@ -1425,6 +1425,53 @@ def delete_fs_items():
         logging.error(traceback.format_exc())
         return jsonify({"success": False, "message": f"服务端异常: {str(e)}"})
 
+# Alist 挂载刷新标志（用于并发控制）
+_alist_refreshing = False
+
+def refresh_alist_mount():
+    """
+    刷新 Alist 挂载（内部函数）
+    通过禁用后5秒再启用的方式刷新挂载状态
+    并发数限制为1
+    整个函数在后台执行，不阻塞调用
+    """
+    global _alist_refreshing
+    
+    # 并发控制：如果正在刷新则直接返回
+    if _alist_refreshing:
+        logging.info("Alist 挂载正在刷新中，跳过本次请求")
+        return
+    
+    _alist_refreshing = True
+    
+    # 在后台线程中执行整个刷新流程
+    def _do_refresh():
+        global _alist_refreshing
+        try:
+            alist_client = get_alist_client()
+            if not alist_client:
+                logging.warning("Alist 未配置，无法刷新挂载")
+                return
+            
+            # 禁用挂载
+            disable_result = alist_client.disable_storage()
+            if not disable_result:
+                logging.error("Alist 挂载禁用失败")
+                return
+            
+            # 5秒后自动启用挂载
+            import time
+            time.sleep(15)
+            alist_client.enable_storage()
+            logging.info("Alist 挂载刷新完成")
+            
+        except Exception as e:
+            logging.error(f"刷新 Alist 挂载异常: {str(e)}")
+        finally:
+            _alist_refreshing = False
+    
+    background_executor.submit(_do_refresh)
+
 # AI排序相关函数
 COMPREHENSIVE_AI_SORT_PROMPT = """
 你是一个视频文件排序专家，请分析以下视频文件列表并生成排序规则。
