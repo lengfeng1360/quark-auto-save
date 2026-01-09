@@ -1330,8 +1330,15 @@ def get_download_url():
         
         return jsonify({"success": False, "message": result.get("message", "获取下载链接失败")})
     except Exception as e:
-        logging.error(f"Error getting download URL: {str(e)}")
-        return jsonify({"success": False, "message": str(e)})
+        error_msg = str(e)
+        logging.error(f"Error getting download URL: {error_msg}")
+        
+        # 检测 "Access Token无效" 并触发刷新
+        if "Access Token无效" in error_msg:
+            refresh_alist_mount()
+            error_msg = f"{error_msg} 请稍等片刻后再试"
+        
+        return jsonify({"success": False, "message": error_msg})
 
 @app.route("/api/library/fs/delete", methods=["POST"])
 def delete_fs_items():
