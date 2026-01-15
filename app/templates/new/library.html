@@ -257,7 +257,7 @@
         padding: 0;
         text-align: center;
         cursor: pointer;
-        z-index: 10;
+        z-index: 9999 !important;
         display: flex;
         justify-content: center;
         align-items: center;
@@ -406,7 +406,7 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/dplayer/dist/DPlayer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hls.js/dist/hls.min.js"></script>
 <script src="/static/js/file-sorter.js"></script>
 <script>
@@ -423,7 +423,7 @@ let playerSettings = {
 let fileSorter = new FileSorter('name'); // 默认按名称排序
 let isRequestingVideo = false;
 let currentPlayFile = null;
-let dp = null; // DPlayer instance
+let art = null; // ArtPlayer instance
 
 // 单一播放会话控制：用于避免并发请求和多实例占用资源
 let playSessionId = 0;
@@ -780,27 +780,22 @@ function getVideoDownloadUrl(filePath, sessionId = null) {
     });
 }
 
-// 处理 HLS 错误的封装函数
-function setupHLSErrorHandling(dp, downloadUrl) {
-    if (!dp || !dp.plugins || !dp.plugins.hls) {
+// 处理 HLS 错误的封装函数 - ArtPlayer 内置了 HLS 错误处理，保留作为备用
+function setupHLSErrorHandling(art, downloadUrl) {
+    if (!art) {
         return;
     }
     
-    dp.plugins.hls.on(Hls.Events.ERROR, function (event, data) {
-        console.error('HLS.js error detected:', data);
-        
-        // 如果是致命的网络错误，就显示回退UI
-        if (data.fatal && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            showVideoErrorFallback(downloadUrl);
-        }
-    });
+    // ArtPlayer 使用 customType 配置 HLS，错误处理已在初始化时配置
+    // 此函数保留用于未来扩展
+    console.log('HLS error handling configured in ArtPlayer initialization');
 }
 
 // 显示视频错误回退UI的封装函数
 function showVideoErrorFallback(downloadUrl) {
-    const dplayerContainer = document.getElementById('dplayer');
-    if (dplayerContainer) {
-        dplayerContainer.innerHTML = `
+    const artplayerContainer = document.getElementById('artplayer');
+    if (artplayerContainer) {
+        artplayerContainer.innerHTML = `
             <div class="video-loading-overlay" style="background-color: #000; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;">
                 <button class="close-video-btn" onclick="closeVideoPlayer()">&times;</button>
                 <i class="bi bi-exclamation-triangle mb-3" style="font-size: 3rem; color: #f85149;"></i>
@@ -831,15 +826,15 @@ function updateVideoInfo(fileName) {
 
 // 显示加载状态的封装函数
 function showLoadingOverlay(message = '正在加载视频...') {
-    const dplayerContainer = document.getElementById('dplayer');
-    if (dplayerContainer) {
+    const artplayerContainer = document.getElementById('artplayer');
+    if (artplayerContainer) {
         const loadingOverlay = document.createElement('div');
         loadingOverlay.className = 'video-loading-overlay';
         loadingOverlay.innerHTML = `
             <div class="spinner-border text-light" role="status"></div>
             <p class="mt-3">${message}</p>
         `;
-        dplayerContainer.appendChild(loadingOverlay);
+        artplayerContainer.appendChild(loadingOverlay);
         return loadingOverlay;
     }
     return null;
@@ -858,18 +853,41 @@ function cancelCurrentVideoRequest(reason) {
     }
 }
 
-// 销毁当前 DPlayer 实例并清理全局引用
+// 销毁当前 ArtPlayer 实例并清理全局引用
 function destroyCurrentPlayer() {
-    if (dp) {
-        trydestroydp(dp);
-        dp = null;
+    if (art) {
+        try {
+            // 停止播放
+            art.pause();
+            art.url = ''; // 清空URL
+            
+            // 【关键】停止视频元素的加载 - 对于非 HLS 视频
+            if (art.video) {
+                art.video.pause();
+                art.video.removeAttribute('src');
+                art.video.load();
+                art.video.src = '';
+            }
+            
+            // 清理HLS实例
+            if (art.hls) {
+                art.hls.destroy();
+                art.hls = null;
+            }
+            
+            // 销毁实例
+            art.destroy();
+        } catch (e) {
+            console.error('An error occurred during ArtPlayer destruction:', e);
+        } finally {
+            art = null;
+        }
     }
 }
 
 
 
 function playVideo(fileName) {
-
     // 为新的播放会话生成 id，并终止上一个会话
     playSessionId += 1;
     const sessionId = playSessionId;
@@ -893,9 +911,9 @@ function playVideo(fileName) {
 
     // 1. 先显示UI框架和加载状态
     contentArea.innerHTML = `
-        <div class="video-container">
-            <button class="close-video-btn" onclick="closeVideoPlayer()">&times;</button>
-            <div id="dplayer" class="video-player">
+        <div class="video-container" id="videoContainer">
+            <button class="close-video-btn" id="closeVideoBtn" onclick="closeVideoPlayer()">&times;</button>
+            <div id="artplayer" class="video-player">
                 <div class="video-loading-overlay">
                     <div class="spinner-border text-light" role="status"></div>
                     <p class="mt-3">正在加载视频...</p>
@@ -922,7 +940,19 @@ function playVideo(fileName) {
         </div>
     `;
 
-    // 2. 获取视频链接
+    // 2. 使用事件委托为关闭按钮绑定事件（更健壮的方案）
+    const videoContainer = document.getElementById('videoContainer');
+    if (videoContainer) {
+        videoContainer.addEventListener('click', (e) => {
+            if (e.target.id === 'closeVideoBtn' || e.target.closest('#closeVideoBtn')) {
+                e.preventDefault();
+                e.stopPropagation();
+                closeVideoPlayer();
+            }
+        }, { capture: true });
+    }
+
+    // 3. 获取视频链接
     const filePath = currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`;
 
     // 初始化当前会话对象
@@ -932,7 +962,8 @@ function playVideo(fileName) {
         path: filePath,
         state: 'RequestingUrl',
         cancelSource: null,
-        initialSeekPerformed: false
+        initialSeekPerformed: false,
+        canplayHandled: false
     };
     // 使用封装的函数获取视频下载链接
     getVideoDownloadUrl(filePath, sessionId)
@@ -944,112 +975,130 @@ function playVideo(fileName) {
 
             currentPlaySession.state = 'InitializingPlayer';
 
-            const dplayerContainer = document.getElementById('dplayer');
-            if (!dplayerContainer) {
+            const artplayerContainer = document.getElementById('artplayer');
+            if (!artplayerContainer) {
                 // UI 已经被关闭或切换，不再初始化播放器
                 return;
             }
 
-            playParams = {
-                container: dplayerContainer,
-                autoplay: true, // 设置为 true
-                // preload: 'auto',  // 让浏览器尽可能多加载
-                video: {
-                    url: downloadUrl, // 直接使用获取到的 URL
-                    type: isM3U8?'auto':'normal',
-                    referrerPolicy: 'no-referrer',
-                    crossOrigin: 'anonymous'
-                }
-            }
-            if(playerSettings.autoNext){
-                highlight = [];
-                // if(playerSettings.skipStart > 0){
-                //     highlight.push({
-                //         time: playerSettings.skipStart,
-                //         text: '跳过片头'
-                //     });
-                // }
-                // if(playerSettings.skipEnd > 0){
-                //     highlight.push({
-                //         time: playerSettings.skipEnd,
-                //         text: '跳过片尾'
-                //     });
-                // }
-                // playParams.highlight = highlight;
-            
-            }
-
-
             // 3. 获取到链接后，再初始化播放器
-            dp = new DPlayer(playParams);
-
+            art = new Artplayer({
+                container: artplayerContainer,
+                url: downloadUrl,
+                type: isM3U8 ? 'm3u8' : 'auto',
+                autoplay: true,
+                volume: 0.7,
+                isLive: isM3U8,
+                fullscreen: true,   // 启用全屏功能
+                fullscreenWeb: true, // 启用网页全屏
+                setting: true,      // 启用设置菜单
+                flip: true,         // 启用翻转功能
+                playbackRate: true, // 启用倍速播放
+                aspectRatio: true,  // 启用宽高比设置
+                autoMini: true,     // 自动小窗口
+                screenshot: true,   // 启用截图功能
+                miniProgressBar: true, // 迷你进度条
+                customType: {
+                    m3u8: function (video, url) {
+                        const hls = new Hls();
+                        hls.loadSource(url);
+                        hls.attachMedia(video);
+                        
+                        // 保存HLS实例到art对象以便后续清理
+                        art.hls = hls;
+                        
+                        // HLS 错误处理
+                        hls.on(Hls.Events.ERROR, function (event, data) {
+                            console.error('HLS error detected:', data);
+                            if (data.fatal && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                                hls.startLoad();
+                            }
+                        });
+                    }
+                }
+            });
+            
             currentPlaySession.state = 'Playing';
 
-            // 设置 HLS 错误处理
-            if (isM3U8) {
-                setupHLSErrorHandling(dp, downloadUrl);
-            }
+            // 监听播放结束事件以实现自动下一集（仅对当前会话生效）
+            art.on('video:ended', () => {
+                if (!currentPlaySession || currentPlaySession.id !== sessionId) {
+                    return;
+                }
+                if (playerSettings.autoNext) {
+                    playNextVideo(currentPlaySession.fileName);
+                }
+            });
+            
 
-                // 监听播放结束事件以实现自动下一集（仅对当前会话生效）
-                dp.on('ended', () => {
-                    if (!currentPlaySession || currentPlaySession.id !== sessionId) {
-                        return;
-                    }
-                    if (playerSettings.autoNext) {
-                        playNextVideo(currentPlaySession.fileName);
-                    }
-                });
-                
-
-                // 优化跳过片头：在视频准备好但未播放时跳转（仅对当前会话生效）
-                // 注意：此事件监听器在后续代码中已扩展，此处不再重复定义
-
-                // 监听时间更新以实现跳过片尾（仅对当前会话生效）
-                dp.on('timeupdate', () => {
-                    if (!currentPlaySession || currentPlaySession.id !== sessionId) {
-                        return;
-                    }
-                    if (playerSettings.skipEnd > 0 && dp.video.duration > 0) {
-                        if (dp.video.currentTime >= dp.video.duration - playerSettings.skipEnd) {
-                            if (playerSettings.autoNext) {
-                                playNextVideo(currentPlaySession.fileName);
-                            }
+            // 监听时间更新以实现跳过片尾（仅对当前会话生效）
+            art.on('video:timeupdate', () => {
+                if (!currentPlaySession || currentPlaySession.id !== sessionId) {
+                    return;
+                }
+                if (playerSettings.skipEnd > 0 && art.duration > 0) {
+                    if (art.currentTime >= art.duration - playerSettings.skipEnd) {
+                        if (playerSettings.autoNext) {
+                            playNextVideo(currentPlaySession.fileName);
                         }
                     }
-                });
+                }
+            });
+            
+
+            currentPlaySession.initialSeekPerformed = false; // 重置标志以允许新的初始跳转
+            // 添加 video:canplay 事件处理，确保视频准备好播放后处理跳过片头
+            art.on('video:canplay', () => {
+
+                if (!currentPlaySession || currentPlaySession.id !== sessionId) {
+                    return;
+                }
+
+                // 防止重复触发
+                if (currentPlaySession.canplayHandled) {
+                    return;
+                }
+                currentPlaySession.canplayHandled = true;
+
+                // 处理跳过片头（先跳转）
+                if (playerSettings.skipStart > 0) {
+                    if (typeof art.seek === 'function') {
+                        art.seek(playerSettings.skipStart);
+                    } else {
+                        art.currentTime = playerSettings.skipStart;
+                    }
+                }
                 
+                // 确保播放（后播放，避免视觉闪烁）
+                if (!art.playing) {
+                    art.play();
+                }
+            });
 
-                currentPlaySession.initialSeekPerformed = false; // 重置标志以允许新的初始跳转
-                // 添加 canplay 事件处理，确保视频准备好播放后处理跳过片头
-                dp.on('canplay', () => {
+            // 播放器错误处理（仅对当前会话生效，避免旧实例销毁时短暂覆盖 UI）
+            art.on('error', (error) => {
+                if (!currentPlaySession || currentPlaySession.id !== sessionId) {
+                    return;
+                }
+                console.error('ArtPlayer error:', error);
+                const artplayerContainerInner = document.getElementById('artplayer');
+                if (artplayerContainerInner) {
+                    artplayerContainerInner.innerHTML = `
+                        <div class="video-loading-overlay" style="background-color: #000; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;">
+                            <button class="close-video-btn" onclick="closeVideoPlayer()">&times;</button>
+                            <i class="bi bi-exclamation-triangle mb-3" style="font-size: 3rem; color: #f85149;"></i>
+                            <h5>播放错误</h5>
+                            <p class="text-muted">${error.message || '未知错误'}</p>
+                        </div>
+                    `;
+                }
+            });
 
-                    if (!currentPlaySession || currentPlaySession.id !== sessionId) {
-                        return;
-                    }
-
-                    if (!currentPlaySession.initialSeekPerformed && playerSettings.skipStart > 0) {
-                        currentPlaySession.initialSeekPerformed = true;
-                        dp.seek(playerSettings.skipStart);
-                    }
-                });
-
-                // 播放器错误处理（仅对当前会话生效，避免旧实例销毁时短暂覆盖 UI）
-                dp.on('error', (error) => {
-                    if (!currentPlaySession || currentPlaySession.id !== sessionId) {
-                        return;
-                    }
-                    console.error('DPlayer error:', error);
-                    const dplayerContainerInner = document.getElementById('dplayer');
-                    if (dplayerContainerInner) {
-                        dplayerContainerInner.innerHTML = `<div class="video-loading-overlay" style="background-color: #000;">播放错误: ${error.message || '未知错误'}</div>`;
-                    }
-                });
-
-                // 添加全屏变化事件监听
-                document.addEventListener('fullscreenchange', handleFullscreenChange);
-                document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-                document.addEventListener('mozfullscreenchange', handleFullscreenChange);
-                document.addEventListener('msfullscreenchange', handleFullscreenChange);
+            // 添加全屏变化事件监听
+            document.addEventListener('fullscreenchange', handleFullscreenChange);
+            document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+            document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+            document.addEventListener('msfullscreenchange', handleFullscreenChange);
         })
         .catch(error => {
             // 如果会话已失效或被新的点击替代，忽略错误
@@ -1064,9 +1113,16 @@ function playVideo(fileName) {
 
             // 显示错误信息
             currentPlaySession.state = 'FallbackError';
-            const dplayerContainer = document.getElementById('dplayer');
-            if (dplayerContainer) {
-                dplayerContainer.innerHTML = `<div class="video-loading-overlay" style="background-color: #000;">获取视频地址失败: ${error.message}</div>`;
+            const artplayerContainer = document.getElementById('artplayer');
+            if (artplayerContainer) {
+                artplayerContainer.innerHTML = `
+                    <div class="video-loading-overlay" style="background-color: #000; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;">
+                        <button class="close-video-btn" onclick="closeVideoPlayer()">&times;</button>
+                        <i class="bi bi-exclamation-triangle mb-3" style="font-size: 3rem; color: #f85149;"></i>
+                        <h5>获取视频地址失败</h5>
+                        <p class="text-muted">${error.message}</p>
+                    </div>
+                `;
             }
         })
         .finally(() => {
@@ -1146,9 +1202,9 @@ function playNextVideo(currentFileName) {
         return;
     }
     playNextVideoTime = nowTime;
-    // 检查 DPlayer 实例是否存在
-    if (!dp) {
-        console.error('DPlayer instance not found, falling back to playVideo');
+    // 检查 ArtPlayer 实例是否存在
+    if (!art) {
+        console.error('ArtPlayer instance not found, falling back to playVideo');
         playVideo(currentFileName);
         return;
     }
@@ -1172,7 +1228,7 @@ function playNextVideo(currentFileName) {
         // 获取下一个视频的链接
         getVideoDownloadUrl(nextPath)
             .then(({ url: downloadUrl, isM3U8 }) => {
-                if (dp) {
+                if (art) {
                     // 移除加载状态
                     if (loadingOverlay && loadingOverlay.parentNode) {
                         loadingOverlay.parentNode.removeChild(loadingOverlay);
@@ -1186,19 +1242,23 @@ function playNextVideo(currentFileName) {
                     if (currentPlaySession) {
                         currentPlaySession.path = nextPath;
                         currentPlaySession.fileName = nextFile.name;
+                        currentPlaySession.initialSeekPerformed = false; // 重置标志以允许新的初始跳转
+                        currentPlaySession.canplayHandled = false; // 重置标志以允许新的 canplay 事件处理
                     }
-                    currentPlaySession.initialSeekPerformed = false; // 重置标志以允许新的初始跳转
-                    // 使用 DPlayer 的 switchVideo 方法切换视频
-                    dp.switchVideo({
-                        url: downloadUrl, // 直接使用获取到的 URL
-                        type: isM3U8?'auto':'normal',
-                        referrerPolicy: 'no-referrer',
-                        crossOrigin: 'anonymous' 
-                    });
-                    dp.play();
+                    
+                    // 使用 ArtPlayer 的 switchUrl 方法切换视频
+                    
+                    // 清理旧的HLS实例
+                    if (art.hls) {
+                        art.hls.destroy();
+                        art.hls = null;
+                    }
+                    
+                    // 只调用 switchUrl，让 video:canplay 事件处理播放
+                    art.switchUrl(downloadUrl, isM3U8 ? 'm3u8' : 'auto');
 
                 } else {
-                    console.error('DPlayer instance not found');
+                    console.error('ArtPlayer instance not found');
                     // 移除加载状态
                     if (loadingOverlay && loadingOverlay.parentNode) {
                         loadingOverlay.parentNode.removeChild(loadingOverlay);
@@ -1223,48 +1283,17 @@ function playNextVideo(currentFileName) {
 }
 
 
-function trydestroydp(_dp) {
-    if (!_dp) {
-        console.log('DPlayer instance does not exist or is already destroyed.');
-        return;
-    }
-    
-    console.log('DPlayer  destroyting....');
-
-    // 1. 立即保存实例并清空全局引用，实现隔离
-    const playerToDestroy = _dp;
- 
-
-    try {
-        //增加空回调,避免出现错误信息
-        playerToDestroy.on('error', null);
-
-        // 2. 对隔离出来的实例执行清理操作
-        playerToDestroy.pause();
-        // playerToDestroy.src('');
-        // playerToDestroy.poster('');
-
-        // 3. 销毁实例
-        playerToDestroy.destroy();
-
-    } catch (e) {
-        console.error('An error occurred during DPlayer destruction:', e);
-    } finally {
-        console.log('DPlayer instance has been destroyed and reference cleared.');
-    }
-    
-}
 
 function closeVideoPlayer() {
     // 标记为非播放状态，允许恢复文件网格渲染
     isVideoPlaying = false;
+    isRequestingVideo = false;
     currentPlayFile = null;
 
     // 如果有正在进行的视频请求，取消它
     cancelCurrentVideoRequest('User closed player');
-    isRequestingVideo = false;
 
-    // 销毁DPlayer实例以释放视频资源
+    // 销毁ArtPlayer实例以释放视频资源
     destroyCurrentPlayer();
 
     // 移除全屏事件监听器
@@ -1277,9 +1306,9 @@ function closeVideoPlayer() {
     currentPlaySession = null;
 
     // 清理其他可能的资源
-    const dplayerContainer = document.getElementById('dplayer');
-    if (dplayerContainer) {
-        dplayerContainer.innerHTML = ''; // 清空容器内容
+    const artplayerContainer = document.getElementById('artplayer');
+    if (artplayerContainer) {
+        artplayerContainer.innerHTML = ''; // 清空容器内容
     }
 
     // 重新显示文件网格
