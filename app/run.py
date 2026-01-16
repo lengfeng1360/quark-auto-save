@@ -1104,35 +1104,25 @@ def get_fs_list():
         path = data.get("path", "/")
         
         # 根据用户角色调整路径
-        path = _get_user_path(path,True)
+        path = _get_user_path(path, True)
         refresh = data.get("refresh", False)
         
-        alist_config = config_data.get("plugins", {}).get("alist", {})
-        if not alist_config.get("url") or not alist_config.get("token"):
-            return jsonify({"success": False, "message": "Alist 未配置"})
+        # 使用单例模式获取 Alist 客户端
+        alist_client = get_alist_client()
+        if not alist_client:
+            return jsonify({"success": False, "message": "Alist 未配置或初始化失败"})
         
-        # 获取文件列表
-        url = f"{alist_config['url']}/api/fs/list"
-        headers = {"Authorization": alist_config['token']}
-        payload = {
-            "path": path,
-            "refresh": refresh,
-            "password": "",
-            "page": 1,
-            "per_page": 0,
-        }
+        # 使用 Alist 实例的方法获取文件列表
+        result = alist_client.get_file_list(path, force_refresh=refresh)
         
-        logging.info(f"Getting file list from: {url}, path: {path}")
-        response = requests.post(url, headers=headers, json=payload)
-        logging.info(f"File list response status: {response.status_code}")
+        logging.info(f"Getting file list from Alist, path: {path}, refresh: {refresh}")
         
-        if response.status_code == 200:
-            result = response.json()
-            if result.get("code") == 200:
-                return jsonify({"success": True, "data": result.get("data", {})})
+        if result.get("code") == 200:
+            return jsonify({"success": True, "data": result.get("data", {})})
         
         return jsonify({"success": False, "message": result.get("message", "获取文件列表失败")})
     except Exception as e:
+        logging.error(f"get_fs_list error: {str(e)}")
         return jsonify({"success": False, "message": str(e)})
 
 @app.route("/api/library/fs/list", methods=["POST"])
