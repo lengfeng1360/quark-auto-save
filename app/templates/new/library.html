@@ -1862,13 +1862,13 @@ function playNextVideo(currentFileName) {
                     const nextSubtitles = findMatchingSubtitles(nextFile.name);
                     subtitleState.availableSubtitles = nextSubtitles;
                     // 使用当前播放会话的 sessionId，确保字幕操作不会因 sessionId 不匹配而被取消
-                    initSubtitleSelector(nextSubtitles, sessionId);
+                    initSubtitleSelector(nextSubtitles, subtitleState.sessionId);
                     
                     // 更新字幕控件可见性
                     updateSubtitleControlsVisibility(nextSubtitles.length);
 
                     if (nextSubtitles.length > 0) {
-                        loadSubtitleToPlayer(nextSubtitles[0], sessionId);
+                        loadSubtitleToPlayer(nextSubtitles[0], subtitleState.sessionId);
                     }
                     
                     // 更新播放会话信息
