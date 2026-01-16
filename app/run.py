@@ -1305,8 +1305,10 @@ def get_download_url():
             logging.info(f"File info response: {result}")
             
             if result.get("code") != 200:
+                msg = result.get("message", "获取下载链接失败")
+                logging.info(f"Failed to get file download url code: {result.get("code")} msg: {msg}")
                 return jsonify({"success": False, "message": msg})
-            
+
             # 成功获取文件信息
             raw_url = result.get("data", {}).get("raw_url", "")
             if raw_url:
