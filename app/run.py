@@ -107,18 +107,21 @@ _alist_instance = None
 def get_alist_client():
     """
     单例模式获取 Alist 客户端实例。
-    如果配置未更改，直接返回缓存的实例，避免重复初始化。
+    如果配置未更改，直接返回缓存的实例。
+    即使初始化失败也返回实例，由调用方处理。
     """
     global _alist_instance
     if _alist_instance is None:
         alist_config = config_data.get("plugins", {}).get("alist", {})
-        # 只有当配置存在且有效时才初始化
         if alist_config.get("url") and alist_config.get("token"):
             try:
                 _alist_instance = Alist(**alist_config)
+                # 设置后台执行器，用于异步执行刷新操作
+                _alist_instance.set_executor(background_executor)
+                if not _alist_instance.is_active:
+                    logging.warning("Alist 初始化失败，将在运行时动态重试")
             except Exception as e:
                 logging.error(f"初始化 Alist 插件失败: {e}")
-                return None
     return _alist_instance
 
 def reset_alist_client():
@@ -1258,9 +1261,10 @@ def get_file_info():
             result = response.json()
             if result.get("code") == 200:
                 return jsonify({"success": True, "data": result.get("data", {})})
-        
+            
         return jsonify({"success": False, "message": result.get("message", "获取文件信息失败")})
     except Exception as e:
+        logging.error(f"get_file_info error: {str(e)}")
         return jsonify({"success": False, "message": str(e)})
 
 @app.route("/api/library/fs/download", methods=["GET", "POST"])
@@ -1299,31 +1303,35 @@ def get_download_url():
         if response.status_code == 200:
             result = response.json()
             logging.info(f"File info response: {result}")
-            if result.get("code") == 200:
-                raw_url = result.get("data", {}).get("raw_url", "")
-                if raw_url:
-                    return jsonify({"success": True, "data": {"download_url": raw_url}})
-                else:
-                    # 如果没有 raw_url，尝试使用下载接口
-                    download_url = f"{alist_client.url}/api/fs/download"
-                    params = {"path": path}
-                    
-                    logging.info(f"Getting download URL from: {download_url}")
-                    download_response = requests.get(download_url, headers=headers, params=params)
-                    
-                    if download_response.status_code == 200:
-                        download_result = download_response.json()
-                        if download_result.get("code") == 200:
-                            download_url = download_result.get("data", {}).get("raw_url", "")
-                            if download_url:
-                                return jsonify({"success": True, "data": {"download_url": download_url}})
+            
+            if result.get("code") != 200:
+                return jsonify({"success": False, "message": msg})
+            
+            # 成功获取文件信息
+            raw_url = result.get("data", {}).get("raw_url", "")
+            if raw_url:
+                return jsonify({"success": True, "data": {"download_url": raw_url}})
+            else:
+                # 如果没有 raw_url，尝试使用下载接口
+                download_url = f"{alist_client.url}/api/fs/download"
+                params = {"path": path}
+                
+                logging.info(f"Getting download URL from: {download_url}")
+                download_response = requests.get(download_url, headers=headers, params=params)
+                
+                if download_response.status_code == 200:
+                    download_result = download_response.json()
+                    if download_result.get("code") == 200:
+                        download_url = download_result.get("data", {}).get("raw_url", "")
+                        if download_url:
+                            return jsonify({"success": True, "data": {"download_url": download_url}})
+                    else:
+                        return jsonify({"success": False, "message": download_result.get("message", "获取下载链接失败")})
         
         return jsonify({"success": False, "message": result.get("message", "获取下载链接失败")})
     except Exception as e:
         error_msg = str(e)
         logging.error(f"Error getting download URL: {error_msg}")
-        
-        
         return jsonify({"success": False, "message": error_msg})
 
 @app.route("/api/library/fs/delete", methods=["POST"])
