@@ -1037,9 +1037,9 @@ async function loadSubtitleWithBlob(url, subtitle, sessionId) {
             blobContent = decodedContent;
             mimeType = 'text/vtt';
         } else if (format === 'ass' || format === 'ssa') {
-            // ASS/SSA 格式：直接使用，ArtPlayer 原生支持
-            blobContent = decodedContent;
-            mimeType = 'text/plain';
+            // ASS/SSA 格式：转换为 VTT
+            blobContent = assToVtt(decodedContent);
+            mimeType = 'text/vtt';
         } else if (format === 'sub') {
             // SUB 格式：暂不支持
             console.warn('SUB format is not supported yet');
@@ -1170,6 +1170,138 @@ function srtToVtt(srtContent) {
     
     vttContent += vttLines.join('\n');
     return vttContent;
+}
+
+// ASS 转 VTT 格式转换函数
+function assToVtt(assContent) {
+    // 添加 VTT 头部
+    let vttContent = 'WEBVTT\n\n';
+    
+    // 移除 BOM
+    const content = assContent.replace(/^\uFEFF/, '');
+    
+    // 分割行
+    const lines = content.split('\n');
+    
+    // 查找 Events 节的起始位置
+    let eventsSectionIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim().toLowerCase().startsWith('[events]')) {
+            eventsSectionIndex = i;
+            break;
+        }
+    }
+    
+    // 如果没有找到 Events 节，尝试直接解析 Dialogue 行
+    if (eventsSectionIndex === -1) {
+        console.warn('No [Events] section found in ASS file, trying to parse Dialogue lines directly');
+    }
+    
+    // 解析 Dialogue 行
+    let vttLines = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        
+        // 跳过注释行
+        if (line.startsWith('Comment:')) {
+            continue;
+        }
+        
+        // 查找 Dialogue 行
+        if (line.startsWith('Dialogue:')) {
+            const dialogue = parseAssDialogueLine(line);
+            if (dialogue && dialogue.text) {
+                // 转换时间格式
+                const vttTime = `${convertAssTimeToVtt(dialogue.start)} --> ${convertAssTimeToVtt(dialogue.end)}`;
+                vttLines.push(vttTime);
+                
+                // 处理文本内容（清理样式标签）
+                const cleanedText = cleanAssStyles(dialogue.text);
+                vttLines.push(cleanedText);
+                vttLines.push(''); // 空行分隔
+            }
+        }
+    }
+    
+    vttContent += vttLines.join('\n');
+    return vttContent;
+}
+
+// 解析 ASS Dialogue 行
+function parseAssDialogueLine(line) {
+    // 移除 "Dialogue:" 前缀
+    const content = line.substring(9).trim();
+    
+    // 按逗号分割字段
+    // ASS Dialogue 格式: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+    const parts = content.split(',');
+    
+    // 至少需要 10 个字段（最后一个字段 Text 可能包含逗号，需要重新组合）
+    if (parts.length < 10) {
+        return null;
+    }
+    
+    const layer = parts[0].trim();
+    const start = parts[1].trim();
+    const end = parts[2].trim();
+    const style = parts[3].trim();
+    const name = parts[4].trim();
+    const marginL = parts[5].trim();
+    const marginR = parts[6].trim();
+    const marginV = parts[7].trim();
+    const effect = parts[8].trim();
+    
+    // Text 字段可能包含逗号，需要重新组合
+    const text = parts.slice(9).join(',').trim();
+    
+    return {
+        layer,
+        start,
+        end,
+        style,
+        name,
+        marginL,
+        marginR,
+        marginV,
+        effect,
+        text
+    };
+}
+
+// 转换 ASS 时间格式到 VTT 时间格式
+// ASS: H:MM:SS.CC 或 HH:MM:SS.CC
+// VTT: HH:MM:SS.mmm
+function convertAssTimeToVtt(assTime) {
+    const parts = assTime.split(':');
+    if (parts.length === 3) {
+        const hours = parts[0].padStart(2, '0');
+        const minutes = parts[1];
+        const secondsWithCenti = parts[2];
+        const secondsParts = secondsWithCenti.split('.');
+        const seconds = secondsParts[0].padStart(2, '0');
+        const centiseconds = secondsParts[1] || '00';
+        // 将厘秒转换为毫秒：1 厘秒 = 10 毫秒
+        const milliseconds = (parseInt(centiseconds) * 10).toString().padStart(3, '0');
+        return `${hours}:${minutes}:${seconds}.${milliseconds}`;
+    }
+    return assTime; // 回退
+}
+
+// 清理 ASS 样式标签，保留纯文本
+function cleanAssStyles(text) {
+    // 替换换行符
+    let cleaned = text.replace(/\\n/gi, '\n');
+    cleaned = cleaned.replace(/\\N/g, '\n');
+    cleaned = cleaned.replace(/\\h/g, ' ');
+    
+    // 移除样式标签 {\...}
+    cleaned = cleaned.replace(/\{\\[^}]+\}/g, '');
+    
+    // 处理转义字符
+    cleaned = cleaned.replace(/\[\\[^\]]+\]/g, '');
+    
+    return cleaned.trim();
 }
 
 // 卸载字幕
