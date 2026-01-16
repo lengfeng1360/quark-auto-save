@@ -16,6 +16,7 @@ class Alist:
     storage_mount_path = None
     quark_root_dir = None
     numeric_storage_id = None  # 存储的数字ID，用于 disable/enable 操作
+    _refreshing = False  # 并发控制标志：是否正在刷新挂载
 
     def __init__(self, **kwargs):
         if kwargs:
@@ -255,3 +256,52 @@ class Alist:
         except Exception as e:
             print(f"Alist存储: 启用挂载出错 {e}")
         return False
+
+    def refresh_mount(self, executor=None):
+        """
+        刷新 Alist 挂载
+        通过禁用后15秒再启用的方式刷新挂载状态
+        并发数限制为1
+        整个函数在后台执行，不阻塞调用
+
+        Args:
+            executor: 可选的后台线程池执行器，如果为 None 则同步执行
+        """
+        # 类级别的并发控制
+        if Alist._refreshing:
+            print("Alist 挂载正在刷新中，跳过本次请求")
+            return
+
+        Alist._refreshing = True
+
+        def _do_refresh():
+            try:
+                # 禁用挂载
+                disable_result = self.disable_storage()
+                if not disable_result:
+                    print("Alist 挂载禁用失败")
+                    return
+
+                # 15秒后自动启用挂载
+                import time
+                time.sleep(15)
+                self.enable_storage()
+                print("Alist 挂载刷新完成")
+
+            except Exception as e:
+                print(f"刷新 Alist 挂载异常: {str(e)}")
+            finally:
+                Alist._refreshing = False
+
+        # 如果提供了 executor，在后台执行；否则同步执行
+        if executor:
+            executor.submit(_do_refresh)
+        else:
+            _do_refresh()
+
+    def check_and_remount(self, msg, executor=None):
+        """
+        检查并重新挂载 Alist
+        """
+        if "Access Token无效" in msg:
+            self.refresh_mount(executor)
