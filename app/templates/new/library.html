@@ -381,6 +381,14 @@
         border: none;
         border-radius: 2px;
     }
+    .subtitle-controls-wrapper {
+        display: flex;
+        gap: 15px;
+        flex-wrap: wrap;
+    }
+    .subtitle-controls-wrapper.hidden {
+        display: none !important;
+    }
 </style>
 <div class="container-fluid">
     <div class="row">
@@ -1426,6 +1434,20 @@ function applySubtitleStylesDirectly(size, color) {
     });
 }
 
+// 更新字幕控件可见性
+function updateSubtitleControlsVisibility(subtitleCount) {
+    const controlsContainer = document.getElementById('subtitleControls');
+    if (controlsContainer) {
+        if (subtitleCount > 0) {
+            controlsContainer.style.display = 'flex';
+            controlsContainer.classList.remove('hidden');
+        } else {
+            controlsContainer.style.display = 'none';
+            controlsContainer.classList.add('hidden');
+        }
+    }
+}
+
 // ========== 字幕相关函数结束 ==========
 
 function playVideo(fileName) {
@@ -1473,23 +1495,25 @@ function playVideo(fileName) {
                     <label>跳过片尾(秒):</label>
                     <input type="number" class="video-control-input" value="${playerSettings.skipEnd}" min="0" onchange="updatePlayerSetting('skipEnd', this.value)">
                 </div>
-                <div class="video-control-item">
-                    <i class="bi bi-badge-cc"></i>
-                    <select id="subtitleSelect" class="video-control-input">
-                        <option value="">无字幕</option>
-                    </select>
-                </div>
-                <div class="video-control-item">
-                    <label>字幕大小(px):</label>
-                    <input type="number" class="video-control-input" id="subtitleSizeInput"
-                           value="${playerSettings.subtitleSize}"
-                           min="12" max="60"
-                           onchange="applySubtitleSettings()">
-                </div>
-                <div class="video-control-item">
-                    <label>字幕颜色:</label>
-                    <input type="color" id="subtitleColorInput" class="video-control-input color-input"
-                           value="${playerSettings.subtitleColor}" onchange="applySubtitleSettings()">
+                <div id="subtitleControls" class="subtitle-controls-wrapper">
+                    <div class="video-control-item">
+                        <i class="bi bi-badge-cc"></i>
+                        <select id="subtitleSelect" class="video-control-input">
+                            <option value="">无字幕</option>
+                        </select>
+                    </div>
+                    <div class="video-control-item">
+                        <label>字幕大小(px):</label>
+                        <input type="number" class="video-control-input" id="subtitleSizeInput"
+                               value="${playerSettings.subtitleSize}"
+                               min="12" max="60"
+                               onchange="applySubtitleSettings()">
+                    </div>
+                    <div class="video-control-item">
+                        <label>字幕颜色:</label>
+                        <input type="color" id="subtitleColorInput" class="video-control-input color-input"
+                               value="${playerSettings.subtitleColor}" onchange="applySubtitleSettings()">
+                    </div>
                 </div>
             </div>
             <div class="video-info mt-3">
@@ -1537,6 +1561,10 @@ function playVideo(fileName) {
 
     // 初始化字幕选择控件
     initSubtitleSelector(subtitles, sessionId);
+    
+    // 更新字幕控件可见性
+    updateSubtitleControlsVisibility(subtitles.length);
+    
     // 使用封装的函数获取视频下载链接
     getVideoDownloadUrl(filePath, sessionId)
         .then(({ url: downloadUrl, isM3U8 }) => {
@@ -1829,6 +1857,9 @@ function playNextVideo(currentFileName) {
                     subtitleState.availableSubtitles = nextSubtitles;
                     // 使用当前播放会话的 sessionId，确保字幕操作不会因 sessionId 不匹配而被取消
                     initSubtitleSelector(nextSubtitles, sessionId);
+                    
+                    // 更新字幕控件可见性
+                    updateSubtitleControlsVisibility(nextSubtitles.length);
 
                     if (nextSubtitles.length > 0) {
                         loadSubtitleToPlayer(nextSubtitles[0], sessionId);
