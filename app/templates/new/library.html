@@ -347,6 +347,18 @@
     .container-fluid {
         padding: 4px !important;
     }
+    #subtitleSelect {
+        min-width: 120px;
+        background-color: #0D1117;
+        border: 1px solid #30363D;
+        color: #C9D1D9;
+        border-radius: 4px;
+        padding: 4px 8px;
+    }
+    #subtitleSelect:focus {
+        border-color: #58A6FF;
+        outline: none;
+    }
 </style>
 <div class="container-fluid">
     <div class="row">
@@ -428,6 +440,15 @@ let art = null; // ArtPlayer instance
 // 单一播放会话控制：用于避免并发请求和多实例占用资源
 let playSessionId = 0;
 let currentPlaySession = null; // { id, fileName, path, state, cancelSource }
+
+// 字幕管理器状态
+const subtitleState = {
+    sessionId: null,
+    availableSubtitles: [],
+    currentSubtitleId: null,
+    cancelled: false,
+    currentBlobUrl: null
+};
 
 // 页面显示时初始化
 document.addEventListener('showPage', function(event) {
@@ -885,7 +906,324 @@ function destroyCurrentPlayer() {
     }
 }
 
+// ========== 字幕相关函数 ==========
 
+// 查找匹配的字幕
+function findMatchingSubtitles(videoFileName) {
+    if (!currentFiles || currentFiles.length === 0) return [];
+    
+    const subtitleExtensions = ['vtt', 'srt', 'ass', 'ssa', 'sub'];
+    const videoNameWithoutExt = videoFileName.replace(/\.[^/.]+$/, '');
+    
+    return currentFiles
+        .filter(file => !file.is_dir && subtitleExtensions.some(ext => file.name.toLowerCase().endsWith('.' + ext)))
+        .map(file => {
+            const ext = file.name.split('.').pop().toLowerCase();
+            const subtitleNameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
+            let matchType = null;
+            let language = 'unknown';
+            
+            if (subtitleNameWithoutExt === videoNameWithoutExt) {
+                matchType = 'exact';
+            } else {
+                const langPatterns = ['zh-cn', 'zh-tw', 'zh-hk', 'zh', 'en', 'chs', 'cht', 'chs-chn', 'zho'];
+                for (const langCode of langPatterns) {
+                    if (subtitleNameWithoutExt.toLowerCase().endsWith('.' + langCode)) {
+                        matchType = 'language';
+                        language = langCode;
+                        break;
+                    }
+                }
+            }
+            
+            if (matchType) {
+                return {
+                    id: file.name,
+                    name: file.name,
+                    fid: file.raw_fid,
+                    format: ext,
+                    language: language,
+                    matchType: matchType
+                };
+            }
+            return null;
+        })
+        .filter(Boolean);
+}
+
+// 渐进增强策略加载字幕
+// 1. 首先尝试直接使用原始 URL
+// 2. 如果加载失败，回退到 Blob URL 方案
+async function loadSubtitleToPlayer(subtitle, sessionId) {
+    if (subtitleState.sessionId !== sessionId || !art) return;
+    
+    try {
+        const filePath = currentPath === '/' ? `/${subtitle.name}` : `${currentPath}/${subtitle.name}`;
+        const { url } = await getVideoDownloadUrl(filePath, sessionId);
+        
+        if (subtitleState.sessionId !== sessionId) return;
+        
+        // 渐进增强策略：先尝试直接使用原始 URL
+        const directLoadSuccess = await tryDirectSubtitleLoad(url, sessionId);
+        
+        // 如果直接加载成功，保存原始 URL 作为当前字幕
+        if (directLoadSuccess) {
+            subtitleState.currentBlobUrl = null; // 使用原始 URL，不需要 Blob
+            return;
+        }
+        
+        // 直接加载失败，回退到 Blob URL 方案
+        console.log('Direct subtitle load failed, falling back to Blob URL');
+        await loadSubtitleWithBlob(url, subtitle, sessionId);
+    } catch (error) {
+        console.error('Failed to load subtitle:', error);
+    }
+}
+
+// 尝试直接使用原始 URL 加载字幕
+async function tryDirectSubtitleLoad(url, sessionId) {
+    if (subtitleState.sessionId !== sessionId || !art) return false;
+    
+    try {
+        // 验证 URL 是否可以正常请求（检测跨域等问题）
+        const response = await fetch(url, { method: 'HEAD' });
+        if (!response.ok) {
+            console.warn('Subtitle URL not accessible:', response.status);
+            return false;
+        }
+        
+        // 直接使用原始 URL
+        if (art.subtitle) {
+            art.subtitle.switch(url);
+            art.subtitle.show = true;
+            console.log('Subtitle loaded directly from URL');
+            return true;
+        }
+    } catch (error) {
+        // fetch 失败（可能是跨域），返回 false 进行回退
+        console.warn('Direct subtitle load failed:', error.message);
+        return false;
+    }
+    
+    return false;
+}
+
+// Blob URL 方案加载字幕（回退方案）
+async function loadSubtitleWithBlob(url, subtitle, sessionId) {
+    if (subtitleState.sessionId !== sessionId || !art) return;
+    
+    try {
+        // 使用 fetch 获取字幕内容
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch subtitle: ${response.status}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        
+        if (subtitleState.sessionId !== sessionId) return;
+        
+        // 根据字幕格式进行差异化处理
+        const format = subtitle.format.toLowerCase();
+        const decodedContent = detectAndDecodeSubtitle(arrayBuffer);
+        let blobContent;
+        let mimeType;
+        
+        if (format === 'srt') {
+            // SRT 格式：需要转换为 VTT
+            blobContent = srtToVtt(decodedContent);
+            mimeType = 'text/vtt';
+        } else if (format === 'vtt') {
+            // VTT 格式：直接使用
+            blobContent = decodedContent;
+            mimeType = 'text/vtt';
+        } else if (format === 'ass' || format === 'ssa') {
+            // ASS/SSA 格式：直接使用，ArtPlayer 原生支持
+            blobContent = decodedContent;
+            mimeType = 'text/plain';
+        } else if (format === 'sub') {
+            // SUB 格式：暂不支持
+            console.warn('SUB format is not supported yet');
+            return;
+        } else {
+            // 其他格式：尝试作为普通文本处理
+            blobContent = decodedContent;
+            mimeType = 'text/plain';
+        }
+        
+        // 创建 Blob URL
+        const blob = new Blob([blobContent], { type: mimeType });
+        const blobUrl = URL.createObjectURL(blob);
+        
+        // 释放旧的 Blob URL
+        if (subtitleState.currentBlobUrl) {
+            URL.revokeObjectURL(subtitleState.currentBlobUrl);
+        }
+        subtitleState.currentBlobUrl = blobUrl;
+        
+        if (art.subtitle) {
+            art.subtitle.switch(blobUrl);
+            art.subtitle.show = true;
+        }
+        console.log('Subtitle loaded via Blob URL');
+    } catch (error) {
+        console.error('Failed to load subtitle via Blob:', error);
+    }
+}
+
+// 改进的编码检测与解码函数
+function detectAndDecodeSubtitle(arrayBuffer) {
+    // 首先尝试 UTF-8 解码
+    const utf8Decoder = new TextDecoder('utf-8');
+    const utf8Text = utf8Decoder.decode(arrayBuffer);
+    
+    // 检测是否包含无效的 Unicode 替换字符（� 或 U+FFFD）
+    // 这是判断是否被错误解码的关键指标
+    const hasInvalidChars = utf8Text.includes('\uFFFD') || /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(utf8Text);
+    
+    // 如果没有无效字符，认为是有效的 UTF-8，直接返回
+    if (!hasInvalidChars) {
+        return utf8Text;
+    }
+    
+    // 如果 UTF-8 解码结果包含无效字符，尝试 GBK 解码
+    try {
+        const gbkDecoder = new TextDecoder('gbk');
+        const gbkText = gbkDecoder.decode(arrayBuffer);
+        
+        // 检查 GBK 解码后是否仍然包含无效字符
+        const gbkHasInvalidChars = gbkText.includes('\uFFFD') || /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(gbkText);
+        
+        if (!gbkHasInvalidChars) {
+            console.log('Detected GBK encoding, converted successfully');
+            return gbkText;
+        }
+    } catch (e) {
+        console.warn('GBK decode failed:', e);
+    }
+    
+    // 如果 GBK 也失败，尝试 GB18030（更广泛的汉字编码）
+    try {
+        const gb18030Decoder = new TextDecoder('gb18030');
+        const gb18030Text = gb18030Decoder.decode(arrayBuffer);
+        const gb18030HasInvalidChars = gb18030Text.includes('\uFFFD') || /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(gb18030Text);
+        
+        if (!gb18030HasInvalidChars) {
+            console.log('Detected GB18030 encoding, converted successfully');
+            return gb18030Text;
+        }
+    } catch (e) {
+        console.warn('GB18030 decode failed:', e);
+    }
+    
+    // 如果所有尝试都失败，返回 UTF-8 结果（可能会有乱码，但不会崩溃）
+    console.warn('Failed to detect encoding, using UTF-8 fallback');
+    return utf8Text;
+}
+
+// SRT 转 VTT 格式转换函数
+function srtToVtt(srtContent) {
+    // 添加 VTT 头部
+    let vttContent = 'WEBVTT\n\n';
+    
+    // 移除 BOM
+    const content = srtContent.replace(/^\uFEFF/, '');
+    
+    // 分割行
+    const lines = content.split('\n');
+    let vttLines = [];
+    let i = 0;
+    
+    // 时间戳正则表达式
+    const timeRegex = new RegExp('(\\d{2}):(\\d{2}):(\\d{2}),(\\d{3})\\s*-->\\s*(\\d{2}):(\\d{2}):(\\d{2}),(\\d{3})');
+    
+    while (i < lines.length) {
+        // 跳过空行
+        if (lines[i].trim() === '') {
+            i++;
+            continue;
+        }
+        
+        // 序号行，跳过
+        if (/^\\d+$/.test(lines[i].trim())) {
+            i++;
+            continue;
+        }
+        
+        // 时间戳行
+        const timeMatch = lines[i].match(timeRegex);
+        if (timeMatch) {
+            const vttTime = `${timeMatch[1]}:${timeMatch[2]}:${timeMatch[3]}.${timeMatch[4]} --> ${timeMatch[5]}:${timeMatch[6]}:${timeMatch[7]}.${timeMatch[8]}`;
+            vttLines.push(vttTime);
+            i++;
+            
+            // 合并文本行，直到下一个时间戳
+            const nextTimeRegex = new RegExp('\\d{2}:\\d{2}:\\d{2}');
+            while (i < lines.length && !nextTimeRegex.test(lines[i])) {
+                vttLines.push(lines[i]);
+                i++;
+            }
+            vttLines.push(''); // 空行分隔
+        } else {
+            i++;
+        }
+    }
+    
+    vttContent += vttLines.join('\n');
+    return vttContent;
+}
+
+// 卸载字幕
+function unloadSubtitle() {
+    if (art && art.subtitle) {
+        art.subtitle.show = false;
+    }
+    subtitleState.currentSubtitleId = null;
+}
+
+// 取消字幕操作
+function cancelSubtitleOperations() {
+    subtitleState.cancelled = true;
+    subtitleState.availableSubtitles = [];
+    subtitleState.currentSubtitleId = null;
+    
+    // 释放 Blob URL
+    if (subtitleState.currentBlobUrl) {
+        URL.revokeObjectURL(subtitleState.currentBlobUrl);
+        subtitleState.currentBlobUrl = null;
+    }
+}
+
+// 初始化字幕选择控件
+function initSubtitleSelector(subtitles, sessionId) {
+    const select = document.getElementById('subtitleSelect');
+    if (!select) return;
+    
+    select.innerHTML = '<option value="">无字幕</option>';
+    
+    subtitles.forEach(sub => {
+        const option = document.createElement('option');
+        option.value = sub.id;
+        option.textContent = sub.name;
+        select.appendChild(option);
+    });
+    
+    select.onchange = (e) => {
+        if (subtitleState.sessionId !== sessionId) return;
+        
+        const value = e.target.value;
+        if (!value) {
+            unloadSubtitle();
+        } else {
+            const subtitle = subtitles.find(s => s.id === value);
+            if (subtitle) {
+                loadSubtitleToPlayer(subtitle, sessionId);
+                subtitleState.currentSubtitleId = value;
+            }
+        }
+    };
+}
+
+// ========== 字幕相关函数结束 ==========
 
 function playVideo(fileName) {
     // 为新的播放会话生成 id，并终止上一个会话
@@ -924,13 +1262,19 @@ function playVideo(fileName) {
                     <input class="form-check-input" type="checkbox" id="autoNextSwitch" ${playerSettings.autoNext ? 'checked' : ''} onchange="updatePlayerSetting('autoNext', this.checked)">
                     <label class="form-check-label" for="autoNextSwitch">自动下一集</label>
                 </div>
-                <div class="video-control-item ms-3">
+                <div class="video-control-item">
                     <label>跳过片头(秒):</label>
                     <input type="number" class="video-control-input" value="${playerSettings.skipStart}" min="0" onchange="updatePlayerSetting('skipStart', this.value)">
                 </div>
-                <div class="video-control-item ms-3">
+                <div class="video-control-item">
                     <label>跳过片尾(秒):</label>
                     <input type="number" class="video-control-input" value="${playerSettings.skipEnd}" min="0" onchange="updatePlayerSetting('skipEnd', this.value)">
+                </div>
+                <div class="video-control-item">
+                    <i class="bi bi-badge-cc"></i>
+                    <select id="subtitleSelect" class="video-control-input">
+                        <option value="">无字幕</option>
+                    </select>
                 </div>
             </div>
             <div class="video-info mt-3">
@@ -965,6 +1309,19 @@ function playVideo(fileName) {
         initialSeekPerformed: false,
         canplayHandled: false
     };
+
+    // 重置字幕状态
+    subtitleState.sessionId = sessionId;
+    subtitleState.cancelled = false;
+    subtitleState.availableSubtitles = [];
+    subtitleState.currentSubtitleId = null;
+
+    // 查找匹配的字幕
+    const subtitles = findMatchingSubtitles(fileName);
+    subtitleState.availableSubtitles = subtitles;
+
+    // 初始化字幕选择控件
+    initSubtitleSelector(subtitles, sessionId);
     // 使用封装的函数获取视频下载链接
     getVideoDownloadUrl(filePath, sessionId)
         .then(({ url: downloadUrl, isM3U8 }) => {
@@ -1048,7 +1405,7 @@ function playVideo(fileName) {
 
             currentPlaySession.initialSeekPerformed = false; // 重置标志以允许新的初始跳转
             // 添加 video:canplay 事件处理，确保视频准备好播放后处理跳过片头
-            art.on('video:canplay', () => {
+            art.on('video:canplay', async () => {
 
                 if (!currentPlaySession || currentPlaySession.id !== sessionId) {
                     return;
@@ -1066,6 +1423,16 @@ function playVideo(fileName) {
                         art.seek(playerSettings.skipStart);
                     } else {
                         art.currentTime = playerSettings.skipStart;
+                    }
+                }
+                
+                // 自动加载第一个字幕
+                if (subtitleState.availableSubtitles.length > 0) {
+                    const select = document.getElementById('subtitleSelect');
+                    if (select) {
+                        select.value = subtitleState.availableSubtitles[0].id;
+                        await loadSubtitleToPlayer(subtitleState.availableSubtitles[0], sessionId);
+                        subtitleState.currentSubtitleId = subtitleState.availableSubtitles[0].id;
                     }
                 }
                 
@@ -1227,7 +1594,7 @@ function playNextVideo(currentFileName) {
         
         // 获取下一个视频的链接
         getVideoDownloadUrl(nextPath)
-            .then(({ url: downloadUrl, isM3U8 }) => {
+            .then(async ({ url: downloadUrl, isM3U8 }) => {
                 if (art) {
                     // 移除加载状态
                     if (loadingOverlay && loadingOverlay.parentNode) {
@@ -1237,6 +1604,16 @@ function playNextVideo(currentFileName) {
                     // 更新当前播放文件和信息
                     currentPlayFile = nextFile.name;
                     updateVideoInfo(nextFile.name);
+
+                    // 加载新视频的字幕
+                    const nextSubtitles = findMatchingSubtitles(nextFile.name);
+                    subtitleState.availableSubtitles = nextSubtitles;
+                    // 使用当前播放会话的 sessionId，确保字幕操作不会因 sessionId 不匹配而被取消
+                    initSubtitleSelector(nextSubtitles, sessionId);
+
+                    if (nextSubtitles.length > 0) {
+                        loadSubtitleToPlayer(nextSubtitles[0], sessionId);
+                    }
                     
                     // 更新播放会话信息
                     if (currentPlaySession) {
@@ -1285,6 +1662,9 @@ function playNextVideo(currentFileName) {
 
 
 function closeVideoPlayer() {
+    // 取消字幕操作
+    cancelSubtitleOperations();
+
     // 标记为非播放状态，允许恢复文件网格渲染
     isVideoPlaying = false;
     isRequestingVideo = false;
