@@ -359,6 +359,28 @@
         border-color: #58A6FF;
         outline: none;
     }
+    /* 颜色选择器样式 */
+    .color-input {
+        width: 50px !important;
+        height: 32px;
+        padding: 2px 4px !important;
+        background-color: #0D1117;
+        border: 1px solid #30363D;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    .color-input:focus {
+        border-color: #58A6FF;
+        outline: none;
+    }
+    /* 颜色选择器在 Webkit 浏览器中的样式优化 */
+    .color-input::-webkit-color-swatch-wrapper {
+        padding: 0;
+    }
+    .color-input::-webkit-color-swatch {
+        border: none;
+        border-radius: 2px;
+    }
 </style>
 <div class="container-fluid">
     <div class="row">
@@ -430,7 +452,9 @@ let selectedFiles = new Set();
 let playerSettings = {
     autoNext: false,
     skipStart: 0,
-    skipEnd: 0
+    skipEnd: 0,
+    subtitleSize: 20,
+    subtitleColor: '#FFFFFF'
 };
 let fileSorter = new FileSorter('name'); // 默认按名称排序
 let isRequestingVideo = false;
@@ -969,12 +993,16 @@ async function loadSubtitleToPlayer(subtitle, sessionId) {
         // 如果直接加载成功，保存原始 URL 作为当前字幕
         if (directLoadSuccess) {
             subtitleState.currentBlobUrl = null; // 使用原始 URL，不需要 Blob
+            // 应用当前的字幕样式设置
+            applySubtitleSettings();
             return;
         }
         
         // 直接加载失败，回退到 Blob URL 方案
         console.log('Direct subtitle load failed, falling back to Blob URL');
         await loadSubtitleWithBlob(url, subtitle, sessionId);
+        // 应用当前的字幕样式设置
+        applySubtitleSettings();
     } catch (error) {
         console.error('Failed to load subtitle:', error);
     }
@@ -1355,6 +1383,49 @@ function initSubtitleSelector(subtitles, sessionId) {
     };
 }
 
+// 应用字幕样式设置
+function applySubtitleSettings() {
+    const sizeInput = document.getElementById('subtitleSizeInput');
+    const colorInput = document.getElementById('subtitleColorInput');
+    
+    if (!sizeInput || !colorInput) return;
+    
+    const size = parseInt(sizeInput.value) || 20;
+    const color = colorInput.value || '#FFFFFF';
+    
+    // 验证大小范围
+    const validSize = Math.max(12, Math.min(60, size));
+    
+    // 更新输入框显示（如果值被修正）
+    if (sizeInput.value != validSize) {
+        sizeInput.value = validSize;
+    }
+    
+    // 更新设置对象
+    playerSettings.subtitleSize = validSize;
+    playerSettings.subtitleColor = color;
+    
+    // 保存到本地存储
+    localStorage.setItem('quark_player_settings', JSON.stringify(playerSettings));
+    
+    // 如果播放器实例存在，应用样式
+    if (art && art.subtitle) {
+        // 备用方案：直接修改字幕元素的样式
+        applySubtitleStylesDirectly(validSize, color);
+    }
+}
+
+// 直接应用到字幕元素
+function applySubtitleStylesDirectly(size, color) {
+    // ArtPlayer 的字幕元素通常在 .art-subtitle 类下
+    const subtitleElements = document.querySelectorAll('.art-subtitle');
+    subtitleElements.forEach(el => {
+        el.style.color = color;
+        el.style.fontSize = `${size}px`;
+        el.style.textShadow = '1px 1px 2px rgba(0,0,0,0.8)';
+    });
+}
+
 // ========== 字幕相关函数结束 ==========
 
 function playVideo(fileName) {
@@ -1407,6 +1478,18 @@ function playVideo(fileName) {
                     <select id="subtitleSelect" class="video-control-input">
                         <option value="">无字幕</option>
                     </select>
+                </div>
+                <div class="video-control-item">
+                    <label>字幕大小(px):</label>
+                    <input type="number" class="video-control-input" id="subtitleSizeInput"
+                           value="${playerSettings.subtitleSize}"
+                           min="12" max="60"
+                           onchange="applySubtitleSettings()">
+                </div>
+                <div class="video-control-item">
+                    <label>字幕颜色:</label>
+                    <input type="color" id="subtitleColorInput" class="video-control-input color-input"
+                           value="${playerSettings.subtitleColor}" onchange="applySubtitleSettings()">
                 </div>
             </div>
             <div class="video-info mt-3">
@@ -1567,6 +1650,9 @@ function playVideo(fileName) {
                         subtitleState.currentSubtitleId = subtitleState.availableSubtitles[0].id;
                     }
                 }
+                
+                // 应用保存的字幕样式设置
+                applySubtitleSettings();
                 
                 // 确保播放（后播放，避免视觉闪烁）
                 if (!art.playing) {
