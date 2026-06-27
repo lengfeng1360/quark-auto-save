@@ -376,10 +376,12 @@ class Alist:
         if self._executor:
             self._executor.submit(_do_refresh)
         else:
-            # 没有executor时，创建守护线程执行
+            # 没有executor时，创建非守护线程执行
+            # 非守护线程确保进程退出前等待恢复流程（禁用→15秒→启用）全部完成
+            # start() 立即返回不阻塞主线程，页面操作不受影响
             import threading
-            daemon_thread = threading.Thread(target=_do_refresh, daemon=True)
-            daemon_thread.start()
+            refresh_thread = threading.Thread(target=_do_refresh, daemon=False)
+            refresh_thread.start()
 
     def _check_token_error(self, msg):
         """检查是否为 Token 无效错误，如果是则触发自动恢复"""
